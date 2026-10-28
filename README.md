@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
-    <img src="docs/logo-light.svg" alt="Vinted × Model Context Protocol" height="96">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/figurophobia/vinted-mcp/main/docs/logo-dark.svg">
+    <img src="https://raw.githubusercontent.com/figurophobia/vinted-mcp/main/docs/logo-light.svg" alt="Vinted × Model Context Protocol" height="96">
   </picture>
 </p>
 
@@ -9,10 +9,11 @@
 
 <p align="center">
   <a href="https://github.com/figurophobia/vinted-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/figurophobia/vinted-mcp/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://pypi.org/project/vinted-mcp/"><img alt="PyPI" src="https://img.shields.io/pypi/v/vinted-mcp?color=09B1BA"></a>
   <img alt="Python" src="https://img.shields.io/badge/python-3.10%E2%80%933.14-3776AB?logo=python&logoColor=white">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-stdio-16181D">
   <img alt="Tools" src="https://img.shields.io/badge/tools-55-09B1BA">
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <a href="https://github.com/figurophobia/vinted-mcp/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
   <a href="https://github.com/figurophobia/wallapop-mcp"><img alt="Sibling: wallapop-mcp" src="https://img.shields.io/badge/sibling-wallapop--mcp-13C1AC"></a>
 </p>
 
@@ -69,20 +70,19 @@ One codebase, three interfaces:
 Python 3.10+.
 
 ```sh
-pip install "git+https://github.com/figurophobia/vinted-mcp"           # library, CLI and MCP server
-pip install "vinted-mcp[browser] @ git+https://github.com/figurophobia/vinted-mcp" && playwright install chromium   # + login window
+pip install vinted-mcp                    # or: uvx vinted-mcp / pipx install vinted-mcp
+pip install 'vinted-mcp[browser]' && playwright install chromium     # + the login window
 ```
 
-Or from a checkout:
+Prefer no Python at all? Download the standalone `vinted-mcp` / `vinted` executables (Linux, macOS, Windows;
+built with PyInstaller) from the [releases page](https://github.com/figurophobia/vinted-mcp/releases).
+
+From a checkout:
 
 ```sh
 git clone https://github.com/figurophobia/vinted-mcp && cd vinted-mcp
 python -m venv .venv && .venv/bin/pip install -e '.[browser,test]'
 ```
-
-Standalone executables (`vinted-mcp`, `vinted`; no Python needed) for Linux, macOS and Windows are built by
-CI and attached to [GitHub releases](https://github.com/figurophobia/vinted-mcp/releases) once a version is
-tagged; `scripts/build_binary.py` builds them locally.
 
 > `curl_cffi` is a hard dependency: Vinted sits behind Cloudflare + DataDome, which reject plain Python
 > HTTP clients, so requests go out with a real Chrome TLS fingerprint.
@@ -421,8 +421,8 @@ flowchart LR
   `Locale`. Uploads add `X-Upload-Form: true`.
 - **Transport policy.** Reads are retried on network errors and 429/5xx (honouring `Retry-After`); writes are
   sent once, and a write that dies mid-flight raises `UnknownOutcomeError`. Requests are paced.
-- Every endpoint with its body, verification status and quirks: [docs/ENDPOINTS.md](docs/ENDPOINTS.md).
-  Agent flows: [AGENTS.md](AGENTS.md).
+- Every endpoint with its body, verification status and quirks: [docs/ENDPOINTS.md](https://github.com/figurophobia/vinted-mcp/blob/main/docs/ENDPOINTS.md).
+  Agent flows: [AGENTS.md](https://github.com/figurophobia/vinted-mcp/blob/main/AGENTS.md).
 
 ## Safety and limits
 
@@ -467,7 +467,7 @@ python -m venv .venv && .venv/bin/pip install -e '.[test,build]'
 ```
 
 CI runs the tests on Python 3.10–3.14, builds the package and the Linux/macOS/Windows executables. Releases:
-bump `VERSION` in `vinted_mcp/config.py` and push a `vX.Y.Z` tag. See [CONTRIBUTING.md](CONTRIBUTING.md).
+bump `VERSION` in `vinted_mcp/config.py` and push a `vX.Y.Z` tag. See [CONTRIBUTING.md](https://github.com/figurophobia/vinted-mcp/blob/main/CONTRIBUTING.md).
 
 ```text
 vinted_mcp/
