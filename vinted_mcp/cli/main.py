@@ -175,7 +175,7 @@ def cmd_favs(args: argparse.Namespace) -> None:
 
 
 def cmd_fav(args: argparse.Namespace) -> None:
-    _out(args, _client(args).set_favourite(args.item, not args.remove))
+    _out(args, _client(args).set_favorite(args.item, not args.remove))
 
 
 def cmd_follow(args: argparse.Namespace) -> None:
@@ -212,9 +212,9 @@ def cmd_message(args: argparse.Namespace) -> None:
 def cmd_offer(args: argparse.Namespace) -> None:
     v = _client(args)
     if args.offer_cmd == "send":
-        _out(args, v.make_offer(args.item, args.price, transaction_id=args.transaction))
+        _out(args, v.send_offer(args.item, args.price, transaction_id=args.transaction))
     elif args.offer_cmd == "options":
-        _out(args, v.offer_options(args.item, args.price))
+        _out(args, v.offer_constraints(args.item, args.price))
     elif args.offer_cmd in ("accept", "decline"):
         _out(args, v.respond_offer(args.transaction, args.offer_request, args.offer_cmd == "accept"))
     elif args.offer_cmd == "counter":
@@ -237,8 +237,16 @@ def cmd_likers(args: argparse.Namespace) -> None:
         _out(args, v.item_likers(args.item))
 
 
-def cmd_orders(args: argparse.Namespace) -> None:
-    _out(args, _client(args).orders(args.kind, args.status, page=args.page))
+def cmd_orders(args: argparse.Namespace, kind: Optional[str] = None) -> None:
+    _out(args, _client(args).orders(kind or args.kind, args.status, page=args.page))
+
+
+def cmd_logout(args: argparse.Namespace) -> None:
+    path = args.session or _cfg.SESSION_PATH
+    existed = os.path.exists(path)
+    if existed:
+        os.remove(path)
+    _out(args, {"ok": True, "removed": path if existed else None})
 
 
 def cmd_wallet(args: argparse.Namespace) -> None:
@@ -375,8 +383,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--version", action="version", version=f"%(prog)s {_cfg.VERSION}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    def add(name: str, fn, help: str) -> argparse.ArgumentParser:
-        p = sub.add_parser(name, help=help)
+    def add(name: str, fn, help: str, aliases: tuple = ()) -> argparse.ArgumentParser:
+        p = sub.add_parser(name, help=help, aliases=list(aliases))
         p.set_defaults(fn=fn)
         return p
 
@@ -424,7 +432,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = add("show", cmd_show, "item details")
     p.add_argument("item")
 
-    p = add("user", cmd_user, "member profile / items / feedback")
+    p = add("seller", cmd_user, "member profile / items / feedback", aliases=("user",))
     p.add_argument("user")
     p.add_argument("--items", action="store_true")
     p.add_argument("--feedback", action="store_true")
@@ -435,11 +443,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--per-page", type=int, default=40)
     p.add_argument("--json", action="store_true")
 
-    p = add("favs", cmd_favs, "your favourites")
+    p = add("favorites", cmd_favs, "your favourites", aliases=("favs",))
     p.add_argument("--per-page", type=int, default=40)
     p.add_argument("--json", action="store_true")
 
-    p = add("fav", cmd_fav, "favourite an item (idempotent)")
+    p = add("favorite", cmd_fav, "favourite an item (idempotent)", aliases=("fav",))
     p.add_argument("item")
     p.add_argument("--remove", action="store_true")
 
@@ -488,6 +496,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--discount", type=float, help="with --all: offer this %% off the listed price")
     p.add_argument("--send", action="store_true", help="with --all: actually send")
 
+    p = add("purchases", lambda a: cmd_orders(a, "purchased"), "your purchases")
+    p.add_argument("--status", default="in_progress", choices=("all", "in_progress", "completed", "canceled"))
+    p.add_argument("--page", type=int, default=1)
+    p = add("selling", lambda a: cmd_orders(a, "sold"), "your sales")
+    p.add_argument("--status", default="in_progress", choices=("all", "in_progress", "completed", "canceled"))
+    p.add_argument("--page", type=int, default=1)
+
+    p = add("logout", cmd_logout, "forget the stored session")
     p = add("orders", cmd_orders, "purchases or sales")
     p.add_argument("kind", nargs="?", default="purchased", choices=("purchased", "sold"))
     p.add_argument("--status", default="all", choices=("all", "in_progress", "completed", "canceled"))
@@ -574,7 +590,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--title")
     p.add_argument("--yes", action="store_true")
 
-    p = add("hide", cmd_hide, "hide a listing (--show to unhide)")
+    p = add("hide", cmd_hide, "pause a listing (--show to bring it back)", aliases=("inactivate",))
     p.add_argument("item")
     p.add_argument("--show", action="store_true")
 

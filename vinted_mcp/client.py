@@ -345,7 +345,7 @@ class Vinted:
         self._require_login()
         return self.send("POST", "core", "/user_favourites/toggle", {"type": "item", "user_favourites": [_item_id(ref)]})
 
-    def set_favourite(self, ref: str | int, favourite: bool) -> Response:
+    def set_favorite(self, ref: str | int, favourite: bool) -> Response:
         """Idempotent favourite: only toggles when the current state differs."""
         if self.is_favourite(ref) == favourite:
             return Response(200, {"code": 0, "unchanged": True, "is_favourite": favourite})
@@ -574,7 +574,7 @@ class Vinted:
         self._require_login()
         return self.get("core", f"/transactions/{int(transaction_id)}")
 
-    def offer_options(self, ref: str | int, price: float, seller_id: Optional[int] = None,
+    def offer_constraints(self, ref: str | int, price: float, seller_id: Optional[int] = None,
                       currency: str = "EUR") -> Response:
         """Offer suggestions/limits for an item at a given listed price."""
         self._require_login()
@@ -587,7 +587,7 @@ class Vinted:
             "seller_id": int(seller_id) if seller_id else None,
         })
 
-    def make_offer(self, ref: str | int, price: float, currency: str = "EUR",
+    def send_offer(self, ref: str | int, price: float, currency: str = "EUR",
                    transaction_id: Optional[int] = None) -> Response:
         """Buyer: send a price offer on an item. Does not buy or pay."""
         self._require_login()

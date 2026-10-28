@@ -24,8 +24,9 @@ def test_writes_registered_with_flag() -> None:
 
 
 def test_no_checkout_tools() -> None:
-    names = _names(True)
-    assert not any(w in n for n in names for w in ("buy", "checkout", "pay", "purchase"))
+    # Reading purchases (list_purchases) is fine; nothing may buy, check out or pay.
+    words = {w for n in _names(True) for w in n.split("_")}
+    assert not words & {"buy", "checkout", "pay", "payment", "purchase", "bump"}
 
 
 def test_session_tools_require_login(tmp_path, monkeypatch) -> None:

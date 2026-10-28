@@ -9,6 +9,8 @@ description = "MCP server for Vinted: search, item details, favourites, messages
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "figurophobia" }]
 keywords = ["vinted", "mcp", "model-context-protocol", "ai-agents", "api", "client", "cli"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -17,6 +19,12 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Internet :: WWW/HTTP",
     "Typing :: Typed",
 ]
@@ -35,6 +43,7 @@ vinted = "vinted_mcp.cli.main:main"
 [project.optional-dependencies]
 browser = ["playwright"]
 test = ["pytest>=8"]
+build = ["build", "twine", "pyinstaller>=6"]
 
 [tool.hatch.version]
 path = "vinted_mcp/config.py"
@@ -43,7 +52,7 @@ path = "vinted_mcp/config.py"
 packages = ["vinted_mcp"]
 
 [tool.hatch.build.targets.sdist]
-include = ["vinted_mcp", "tests", "docs", "AGENTS.md", "LICENSE", "README.md"]
+include = ["vinted_mcp", "tests", "docs", "packaging", "scripts", "AGENTS.md", "CONTRIBUTING.md", "LICENSE", "README.md"]
 exclude = ["**/__pycache__", "cookies.txt", "session.json", ".env"]
 
 [tool.pytest.ini_options]

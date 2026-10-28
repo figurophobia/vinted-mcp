@@ -29,7 +29,6 @@ _lock = threading.Lock()  # the client is not designed for concurrent use
 
 Order = Literal["relevance", "newest_first", "price_low_to_high", "price_high_to_low"]
 Condition = Literal["new_with_tags", "new_without_tags", "very_good", "good", "satisfactory"]
-OrderKind = Literal["purchased", "sold"]
 OrderStatus = Literal["all", "in_progress", "completed", "canceled"]
 
 
@@ -202,8 +201,9 @@ def get_item(item: str) -> dict:
         return _jsonable(_c().item(item))
 
 
-def get_user(user: str, include_items: bool = False, include_feedback: bool = False) -> dict:
-    """A member's public profile; optionally their listings and recent feedback."""
+def get_seller(user_id: str, include_reviews: bool = False, include_items: bool = False) -> dict:
+    """A member's public profile and ratings; optionally recent reviews and their listings."""
+    user = user_id
     with _lock:
         u = _c().user(user)
         keys = ("id", "login", "profile_url", "item_count", "followers_count", "following_count", "feedback_count",
@@ -215,10 +215,25 @@ def get_user(user: str, include_items: bool = False, include_feedback: bool = Fa
 
             r = _c().user_items(user, per_page=40)
             out["items"] = [item_from_api(i, _c().web).to_dict() for i in (r.data or {}).get("items", [])] if r.ok else r.error_reason
-        if include_feedback:
+        if include_reviews:
             r = _c().user_feedback(user, per_page=10)
-            out["feedback"] = (r.data or {}).get("user_feedbacks") if r.ok else r.error_reason
+            out["reviews"] = (r.data or {}).get("user_feedbacks") if r.ok else r.error_reason
     return _jsonable(out)
+
+
+def seller_items(user_id: str, pages: int = 1, limit: int = 40) -> list:
+    """List a member's published listings (their closet)."""
+    from .models import item_from_api
+
+    out: list = []
+    with _lock:
+        for page in range(1, max(1, min(pages, 5)) + 1):
+            r = _c().user_items(user_id, page=page, per_page=max(1, min(limit, 96))).raise_for_error()
+            items = r.data.get("items") or []
+            out.extend(item_from_api(i, _c().web).to_dict() for i in items)
+            if len(out) >= limit or page >= int((r.data.get("pagination") or {}).get("total_pages") or page):
+                break
+    return _jsonable(out[:limit])
 
 
 def my_items(page: int = 1, per_page: int = 40) -> list:
@@ -231,7 +246,7 @@ def my_items(page: int = 1, per_page: int = 40) -> list:
     return _jsonable([item_from_api(i, _c().web).to_dict() for i in r.data.get("items") or []])
 
 
-def list_favourites(page: int = 1, per_page: int = 40) -> list:
+def list_favorites(page: int = 1, per_page: int = 40) -> list:
     """Listings you have favourited."""
     _require_session()
     from .models import item_from_api
@@ -273,7 +288,7 @@ def get_conversation(conversation_id: str) -> dict:
 
 
 def get_offer_status(conversation_id: str) -> dict:
-    """Offer history of a conversation (buyer offers with status, seller offers) plus its transaction id. Use the ids with respond_offer / make_offer."""
+    """Offer history of a conversation (buyer offers with status, seller offers) plus its transaction id. Use the ids with respond_offer / send_offer."""
     from .models import offer_events
 
     _require_session()
@@ -308,7 +323,7 @@ def list_item_likers(item: Optional[str] = None) -> list:
         return _jsonable(_c().item_likers(item))
 
 
-def unread_counts() -> dict:
+def unread_count() -> dict:
     """Unread messages and notifications."""
     _require_session()
     with _lock:
@@ -324,11 +339,18 @@ def list_notifications(page: int = 1, per_page: int = 20) -> dict:
         return _resp(_c().notifications(page=page, per_page=max(1, min(per_page, 50))))
 
 
-def list_orders(kind: OrderKind = "purchased", status: OrderStatus = "all", page: int = 1) -> dict:
-    """Your purchases or sales and their status. Read-only: no checkout."""
+def list_purchases(status: OrderStatus = "in_progress", page: int = 1) -> dict:
+    """Your purchases and their status (in_progress, completed, canceled or all). Does not perform checkout."""
     _require_session()
     with _lock:
-        return _resp(_c().orders(kind, status, page=page))
+        return _resp(_c().orders("purchased", status, page=page))
+
+
+def list_sales(status: OrderStatus = "in_progress", page: int = 1) -> dict:
+    """Your sales and their status (in_progress, completed, canceled or all)."""
+    _require_session()
+    with _lock:
+        return _resp(_c().orders("sold", status, page=page))
 
 
 def get_transaction(transaction_id: int) -> dict:
@@ -354,20 +376,21 @@ def list_saved_searches() -> dict:
         return _resp(_c().saved_searches())
 
 
-def offer_options(item: str, price: float) -> dict:
-    """Suggested offer amounts and limits for an item listed at `price`."""
+def get_offer_constraints(item: str, price: float) -> dict:
+    """Offer limits (min/max price, offers left) and suggested amounts for an item listed at `price`."""
     _require_session()
     with _lock:
-        return _resp(_c().offer_options(item, price))
+        return _resp(_c().offer_constraints(item, price))
 
 
 # --- write tools (only registered with --allow-writes) ---------------------
 
-def set_favourite(item: str, favourite: bool) -> dict:
-    """Favourite or unfavourite a listing (idempotent)."""
+def set_favorite(item_id: str, favorited: bool) -> dict:
+    """Set whether a listing is a favorite (idempotent)."""
+    item, favourite = item_id, favorited
     _require_session()
     with _lock:
-        return _resp(_c().set_favourite(item, favourite))
+        return _resp(_c().set_favorite(item, favourite))
 
 
 def toggle_follow(user: str) -> dict:
@@ -389,11 +412,11 @@ def send_message(text: str = "", conversation_id: Optional[str] = None, item: Op
         return _resp(_c().message_item(item, text, photo_paths=photo_paths))
 
 
-def make_offer(item: str, price: float, transaction_id: Optional[int] = None) -> dict:
+def send_offer(item: str, price: float, transaction_id: Optional[int] = None) -> dict:
     """Buyer: send a price offer on an item. Does not buy or pay; the seller accepts or declines."""
     _require_session()
     with _lock:
-        return _resp(_c().make_offer(item, price, transaction_id=transaction_id))
+        return _resp(_c().send_offer(item, price, transaction_id=transaction_id))
 
 
 def respond_offer(transaction_id: int, offer_request_id: int, accept: bool) -> dict:
@@ -509,8 +532,9 @@ def edit_item(
         return _resp(_c().edit_item(item, **changes))
 
 
-def set_item_hidden(item: str, hidden: bool) -> dict:
-    """Hide (pause) or show one of your listings."""
+def pause_item(item: str, paused: bool = True) -> dict:
+    """Pause (hide from the catalogue) one of your listings, or bring it back with paused=false."""
+    hidden = paused
     _require_session()
     with _lock:
         return _resp(_c().set_hidden(item, hidden))
@@ -636,15 +660,15 @@ def save_search(search_id: int, saved: bool = True) -> dict:
 
 _READ_TOOLS = [
     session_status, whoami, search, search_filters, suggest, list_categories, suggest_category, find_brand, find_city,
-    listing_options, get_item, similar_items, get_user,
-    my_items, list_favourites, list_inbox, get_conversation, get_offer_status, list_item_likers, item_stats, unread_counts, list_notifications, list_orders,
-    get_transaction, wallet, list_saved_searches, offer_options,
+    listing_options, get_item, similar_items, get_seller, seller_items,
+    my_items, list_favorites, list_inbox, get_conversation, get_offer_status, list_item_likers, item_stats, unread_count, list_notifications, list_purchases, list_sales,
+    get_transaction, wallet, list_saved_searches, get_offer_constraints,
 ]
 _WRITE_TOOLS = [
-    set_favourite, toggle_follow, send_message, make_offer, respond_offer, counter_offer, offer_to_liker,
+    set_favorite, toggle_follow, send_message, send_offer, respond_offer, counter_offer, offer_to_liker,
     message_all_likers,
     mark_conversation_read, delete_message, delete_conversation,
-    publish_item, publish_draft, edit_item, set_item_hidden, reserve_item, delete_item, delete_draft, save_search,
+    publish_item, publish_draft, edit_item, pause_item, reserve_item, delete_item, delete_draft, save_search,
     update_profile, block_user, set_holiday_mode, set_bundle_discounts, listing_from_photos, negotiate_offer, relist_item,
 ]
 

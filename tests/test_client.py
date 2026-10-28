@@ -128,13 +128,13 @@ def test_message_item_creates_inquiry_with_string_ids(client: Vinted, fake: Fake
     assert r.ok and fake.calls[-1]["json"]["content"] == "hola"
 
 
-def test_make_offer_opens_conversation_for_transaction(client: Vinted, fake: FakeTransport) -> None:
+def test_send_offer_opens_conversation_for_transaction(client: Vinted, fake: FakeTransport) -> None:
     page = ('<script>self.__next_f.push([1,"{\\"plugins\\":[{\\"name\\":\\"ask_seller\\",'
             '\\"data\\":{\\"seller_id\\":\\"555000111\\"}}]}"])</script>')
     fake.routes[("GET", "/items/9")] = Response(200, page)
     fake.routes[("POST", "/messaging/main/inquiries")] = ok({"conversation_id": "c", "transaction_id": "77"})
     fake.routes[("POST", "/api/v2/transactions/77/offer_requests")] = ok({"offer_request": {"id": 1}, "code": 0})
-    r = client.make_offer(9, 35)
+    r = client.send_offer(9, 35)
     inquiry = next(c for c in fake.calls if c["url"].endswith("/messaging/main/inquiries"))
     assert inquiry["json"] == {"item_ids": ["9"], "receiver_id": "555000111"}
     assert r.ok and fake.calls[-1]["json"] == {"offer_request": {"price": "35", "currency": "EUR"}}
@@ -150,13 +150,13 @@ def test_respond_offer_paths(client: Vinted, fake: FakeTransport) -> None:
     assert fake.calls[1]["url"].endswith("/transactions/1/offer_requests/2/reject")
 
 
-def test_set_favourite_is_idempotent(client: Vinted, fake: FakeTransport) -> None:
+def test_set_favorite_is_idempotent(client: Vinted, fake: FakeTransport) -> None:
     fake.routes[("GET", "/users/42/items/favourites")] = ok({"items": [{"id": 5}], "pagination": {"total_pages": 1}})
-    r = client.set_favourite(5, True)
+    r = client.set_favorite(5, True)
     assert r.data["unchanged"] is True
     assert not any(c["url"].endswith("/user_favourites/toggle") for c in fake.calls)
     fake.routes[("POST", "/user_favourites/toggle")] = ok({"code": 0})
-    r = client.set_favourite(5, False)
+    r = client.set_favorite(5, False)
     assert fake.calls[-1]["json"] == {"type": "item", "user_favourites": [5]}
 
 

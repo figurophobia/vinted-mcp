@@ -37,12 +37,12 @@ Check offline with `vinted session` / `session_status`. Token refresh is automat
    Extra filters by code: `attributes={"video_game_platform": [1265]}`.
 3. **Inspect** — `get_item(id)` (description, photos, attributes, seller, `can_buy`, `is_reserved`,
    `shipping.from_price` = the "Envío desde" price; `search(..., include_shipping=true)` adds it to results),
-   `get_user(seller_id, include_feedback=True)`, `similar_items(id)`.
+   `get_seller(seller_id, include_reviews=True)`, `seller_items(seller_id)`, `similar_items(id)`.
 4. **Ask** — `send_message(text, item=id)` creates the conversation; later `send_message(text, conversation_id=…)`.
-5. **Offer** — `offer_options(item, listed_price)` gives `min_price`/suggestions; `make_offer(item, price)`
+5. **Offer** — `get_offer_constraints(item, listed_price)` gives `min_price`/suggestions; `send_offer(item, price)`
    (pass `transaction_id` from the conversation to skip re-opening it). Not a purchase.
 6. **Negotiate** — `get_offer_status(conversation_id)`: `buyer_offer` events carry `status`
-   (pending/accepted/rejected); a `seller_offer` is the seller's counter. Counter again with `make_offer`.
+   (pending/accepted/rejected); a `seller_offer` is the seller's counter. Counter again with `send_offer`.
    There is no "accept" for a seller offer: on Vinted the buyer accepts it by pressing *Buy* with that
    offer (`/purchases/checkout/build`), i.e. the purchase, which the user does by hand.
 
@@ -56,7 +56,7 @@ Check offline with `vinted session` / `session_status`. Token refresh is automat
    New listings are briefly hidden while processed; check `my_items`.
 3. **Edit** — `edit_item(item, price=…, title=…)` changes only what you pass. Vinted re-reviews edits:
    `status.item_alert_type = "delayed_publication"` (hidden, not editable/hideable) for a while.
-4. **Lifecycle** — `set_item_hidden(item, true|false)`, `reserve_item(transaction_id=…)` /
+4. **Lifecycle** — `pause_item(item, paused)`, `reserve_item(transaction_id=…)` /
    `reserve_item(item=…, reserved=false)`, `delete_item(item)`, `publish_draft(id)` / `delete_draft(id)`,
    `item_stats(item)` (views, favourites, likers), `set_holiday_mode(on)` (whole closet),
    `set_bundle_discounts(enabled, {2: 5, 3: 10})`.
@@ -93,9 +93,11 @@ Check offline with `vinted session` / `session_status`. Token refresh is automat
 
 ## MCP tool reference
 
-**Reads (27):** `session_status`, `whoami`, `search`, `search_filters`, `suggest`, `list_categories`, `suggest_category`, `find_brand`, `find_city`, `listing_options`, `get_item`, `similar_items`, `get_user`, `my_items`, `list_favourites`, `list_inbox`, `get_conversation`, `get_offer_status`, `list_item_likers`, `item_stats`, `unread_counts`, `list_notifications`, `list_orders`, `get_transaction`, `wallet`, `list_saved_searches`, `offer_options`.
+**Reads (29):** `session_status`, `whoami`, `search`, `search_filters`, `suggest`, `list_categories`, `suggest_category`, `find_brand`, `find_city`, `listing_options`, `get_item`, `similar_items`, `get_seller`, `seller_items`, `my_items`, `list_favorites`, `list_inbox`, `get_conversation`, `get_offer_status`, `list_item_likers`, `item_stats`, `unread_count`, `list_notifications`, `list_purchases`, `list_sales`, `get_transaction`, `wallet`, `list_saved_searches`, `get_offer_constraints`.
 
-**Writes (26, `--allow-writes`):** `set_favourite`, `toggle_follow`, `send_message`, `make_offer`, `respond_offer`, `counter_offer`, `offer_to_liker`, `message_all_likers`, `mark_conversation_read`, `delete_message`, `delete_conversation`, `publish_item`, `publish_draft`, `edit_item`, `set_item_hidden`, `reserve_item`, `delete_item`, `delete_draft`, `save_search`, `update_profile`, `block_user`, `set_holiday_mode`, `set_bundle_discounts`, `listing_from_photos`, `negotiate_offer`, `relist_item`.
+**Writes (26, `--allow-writes`):** `set_favorite`, `toggle_follow`, `send_message`, `send_offer`, `respond_offer`, `counter_offer`, `offer_to_liker`, `message_all_likers`, `mark_conversation_read`, `delete_message`, `delete_conversation`, `publish_item`, `publish_draft`, `edit_item`, `pause_item`, `reserve_item`, `delete_item`, `delete_draft`, `save_search`, `update_profile`, `block_user`, `set_holiday_mode`, `set_bundle_discounts`, `listing_from_photos`, `negotiate_offer`, `relist_item`.
+
+Names match wallapop-mcp wherever the concept is the same.
 
 ## API quirks (handled by the library)
 
