@@ -334,7 +334,9 @@ def build_client(required: bool = True, path: Optional[str] = None) -> Vinted:
     return client
 
 
-_BROWSER_SOURCES = set(_CHROMIUM_DIRS) | {"firefox", "wizard"}
+#: Sessions shared with a browser the user keeps using. Wizard sessions are not
+#: here: the wizard profile only ever holds tokens older than the library's.
+_BROWSER_SOURCES = set(_CHROMIUM_DIRS) | {"firefox"}
 
 
 def _jwt(token: Optional[str]) -> dict:
@@ -356,15 +358,23 @@ def _usable(cookies: dict[str, str], user_id: Optional[str], margin: int = 60) -
     return user_id is None or str(payload["sub"]) == str(user_id)
 
 
+def _issued(token: Optional[str]) -> int:
+    return int(_jwt(token).get("iat") or 0)
+
+
 def recover_session(client: Vinted, source: str, domain: str, profile: Optional[str] = None) -> bool:
     """Get valid tokens back after a 401, without fighting the source browser.
 
-    Vinted rotates the refresh token on every refresh and kills the session
-    when a rotated token is replayed, and the source browser refreshes the
-    same session on its own. So: (1) if the browser already holds a newer,
-    valid access token, adopt it (no refresh at all); (2) otherwise refresh
-    with our token; (3) if that fails and the browser has a different refresh
-    token (it rotated first), adopt it and refresh with that one.
+    Vinted rotates the refresh token on every refresh and kills the whole
+    session when a rotated (older) token is replayed; the source browser
+    refreshes the same session on its own. So browser tokens are only adopted
+    when they are *newer* than ours (``iat``), never older:
+
+    1. the browser holds a newer, valid access token -> adopt it, no refresh;
+    2. otherwise refresh with our own token;
+    3. only if Vinted *rejected* our token (400/401, not an anti-bot 403, 5xx or
+       network error) and the browser has a newer refresh token -> adopt it and
+       refresh with that one.
     """
     mine = client.cookies()
     user_id = _jwt(mine.get("access_token_web")).get("sub") or _jwt(mine.get("refresh_token_web")).get("sub")
@@ -379,12 +389,14 @@ def recover_session(client: Vinted, source: str, domain: str, profile: Optional[
                 client.http.set_cookie(name, c[name])
         client._persist()
 
-    if fresh.get("access_token_web") != mine.get("access_token_web") and _usable(fresh, user_id):
+    newer_refresh = _issued(fresh.get("refresh_token_web")) > _issued(mine.get("refresh_token_web"))
+    newer_access = _issued(fresh.get("access_token_web")) > _issued(mine.get("access_token_web"))
+    if newer_access and _usable(fresh, user_id) and (newer_refresh or not fresh.get("refresh_token_web")):
         adopt(fresh)
         return True
     if client.refresh():
         return True
-    if fresh.get("refresh_token_web") and fresh["refresh_token_web"] != mine.get("refresh_token_web"):
+    if client.last_refresh_rejected and newer_refresh:
         adopt(fresh)
         return client.refresh()
     return False

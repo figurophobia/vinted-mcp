@@ -62,8 +62,8 @@ own domain).
 }
 ```
 
-Writes are hidden unless `--allow-writes` is passed. 43 tools (25 read, 18
-write); full reference and agent flows in [AGENTS.md](AGENTS.md).
+Writes are hidden unless `--allow-writes` is passed. 53 tools (27 read, 26
+write, including agent automation: listing from photos, auto-negotiation, relisting); full reference and agent flows in [AGENTS.md](AGENTS.md).
 
 ## CLI
 

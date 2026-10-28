@@ -50,7 +50,9 @@ applied it. Requests are spaced by `VINTED_RATE_PACE` (0.6 s).
 
 **Photo upload.** `POST core/photos` as `multipart/form-data` with `photo[type]=item`,
 `photo[temp_uuid]=<upload session uuid>`, `photo[file]=<jpeg/png>`; returns `{id}`. All photos of one listing
-share the same uuid, which is then sent as `item.temp_uuid` and `upload_session_id`.
+share the same uuid, which is then sent as `item.temp_uuid` and `upload_session_id`. The same endpoint
+takes `photo[type]=user` (profile photo → `temp_uuid` → `user.photo_temp_uuid`) and `photo[type]=user_msg`
+(chat photo → `temp_uuid` → `photo_temp_uuids` of a reply), without `photo[temp_uuid]`.
 
 ## Auth
 
@@ -71,7 +73,11 @@ share the same uuid, which is then sent as `item.temp_uuid` and `upload_session_
 | ✅ | `POST /user_favourites/toggle {type:"item", user_favourites:[id]}` | toggle |
 | ✅ | `GET /my_orders?type=purchased|sold&status=all&page&per_page` | orders |
 | ✅ | `GET /transactions/{id}` | deal: item, buyer, seller, `offer_id`, shipment |
-| 📦 | `POST/DELETE /users/{id}/holiday`, `PUT /users/current` | holiday mode, profile |
+| ✅ | `PUT /users/current {user: {real_name, city_id, country_id, gender, birthday, text_about, login, photo_temp_uuid, user_settings: {is_location_public, on_holiday, international_trading_enabled}}}` | profile update; holiday mode on = `on_holiday: true` (send every field back, it rewrites the profile) |
+| ✅ | `DELETE /users/{id}/holiday` | holiday mode off |
+| ✅ | `PUT /users/current` (same body) | profile edit: `text_about` (bio), `city_id`, `real_name`, `user_settings.is_location_public`, `photo_temp_uuid` (avatar) |
+| ✅ | `GET /countries/{country_id}/cities?search_text` | city ids for the profile |
+| ✅ | `POST /users/{me}/user_hates {hated_user_id}` / `DELETE /users/{me}/user_hates?hated_user_id=` | block / unblock (`users/{id}.is_hated`) |
 
 ## Catalogue (edge)
 
@@ -98,14 +104,16 @@ Status (condition) ids: 6 new with tags, 1 new without tags, 2 very good, 3 good
 | ✅ | `GET /messaging/main/conversations/{uuid}` | messages, `data.transaction_id`, `current_user_side` |
 | ✅ | `GET /messaging/main/users/unread_count` | |
 | ✅ | `POST /messaging/main/inquiries {item_ids:["id"], receiver_id:"id"}` | → `{conversation_id, transaction_id}` (strings!) |
-| ✅ | `POST /messaging/main/conversations/{uuid}/replies {content, is_personal_data_sharing_check_skipped:false, photo_temp_uuids:[]}` | send |
+| ✅ | `POST /messaging/main/conversations/{uuid}/replies {content|null, is_personal_data_sharing_check_skipped:false, photo_temp_uuids:[…]|null}` | send text and/or photos |
 | ✅ | `POST /messaging/main/conversations/{uuid}/mark_as_read` | mark read |
 | ✅ | `DELETE /messaging/main/conversations/{uuid}/replies/{entity_id}` | delete own message; `entity_id` = numeric `messages[].data.entity.id` (the message uuid → 400 `invalid message ID`) |
-| 📦 | `DELETE /messaging/main/conversations/{uuid}` | delete conversation |
+| ✅ | `DELETE /messaging/main/conversations/{uuid}` | delete conversation (only `is_deletable`) |
 | ✅ | `GET /inbox-notifications/v1/notifications?page&per_page` | notifications (`entry_type` 20 = someone favourited your item, 300 = a favourite sold) |
 | ✅ | `GET /inbox-notifications/v1/notifications/unread_count` | `{count}` |
 | ✅ | `GET /ledger/wallet/balance`, `GET /wallet/history/overview` | wallet |
-| ✅ | `GET /messaging/bundles/discounts/settings` | bundle discounts |
+| ✅ | `GET /messaging/bundles/discounts/settings` | bundle discounts `{enabled, tiers:[{discount_value, min_items}]}` |
+| ✅ | `PUT /messaging/bundles/discounts/settings {enabled, tiers:[{discount_value:"0.05", min_items:2}, …]}` | set them; Vinted keeps tiers for 2, 3 and 5 items and fills missing ones |
+| ✅ | `GET edge/vas/items/{id}/bumps/stats?timezone` | daily views/impressions, only for bumped items (404 otherwise) |
 
 Who favourited your items: no endpoint. Notifications with `entry_type` 20 ("X ha marcado como favorito tu
 artículo") carry `link=…messaging?item_id=…&user_id=…`; the seller can then `POST /messaging/main/inquiries`
@@ -139,7 +147,11 @@ Message `data.entity_type`: `message`, `offer_request_message` (buyer offer: `of
 | ✅ | `PUT /item_upload/items/{id}` (same body, `item.id` set, photos = item photo ids, or new `/photos` ids to replace them) | edit |
 | ✅ | `PUT /items/{id}/is_hidden {is_hidden}` | hide/show (400 while under review) |
 | ✅ | `POST /items/{id}/delete` | delete (403 `access_denied` while under review) |
-| 📦 | `POST /item_upload/drafts/{id}/completion` | publish a draft |
+| ✅ | `POST /item_upload/drafts/{id}/completion {draft, push_up:false, parcel:null, upload_session_id}` | publish a draft (draft = same shape as `item`, `id` set) |
+| ✅ | `POST /item_upload/suggestions/categories {image_metadata:[{image_id:<photo.high_resolution.id>, orientation:"0"}], upload_session_id}` | categories guessed from photos → `{categories, prefill_categories}` |
+| ✅ | `POST /item_upload/suggestions/attributes {title, description, category_id, suggested_category_id, image_metadata, upload_session_id, attributes}` | brand/colour/model suggestions |
+| ✅ | `POST edge/upload-form-suggestions/item_price_suggestions {category_id, brand_id, condition_id, model_metadata, image_metadata, attributes}` | price recommendation min/mid/max. Numeric ids here, string ids inside `attributes` |
+| ✅ | `POST edge/upload-form-suggestions/item_upload/items/similar_sold_items {…same, price_from, price_to, currency_code, upload_session_id}` | comparable sold items |
 | 📦 | `POST /vas/bumps/orders` | paid bump — not implemented (payment) |
 
 `item` body:

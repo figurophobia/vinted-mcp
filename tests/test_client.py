@@ -220,9 +220,9 @@ def test_offer_to_liker(client: Vinted, fake: FakeTransport) -> None:
 
 
 def test_delete_message_path(client: Vinted, fake: FakeTransport) -> None:
-    fake.routes[("DELETE", "/messaging/main/conversations/c/replies/73496224709")] = ok({"code": 0})
-    assert client.delete_message("c", "73496224709").ok
-    assert fake.calls[-1]["url"] == "https://api.vinted.es/messaging/main/conversations/c/replies/73496224709"
+    fake.routes[("DELETE", "/messaging/main/conversations/c/replies/12345678901")] = ok({"code": 0})
+    assert client.delete_message("c", "12345678901").ok
+    assert fake.calls[-1]["url"] == "https://api.vinted.es/messaging/main/conversations/c/replies/12345678901"
 
 
 def _likers_setup(fake: FakeTransport) -> None:
@@ -266,3 +266,38 @@ def test_item_includes_shipping(client: Vinted, fake: FakeTransport) -> None:
     d = client.item(9)
     assert d["shipping"] == {"from_price": "3.85", "currency": "EUR", "free": False, "pickup_only": False,
                              "multiple_options": True}
+
+
+def test_update_profile_keeps_other_fields(client: Vinted, fake: FakeTransport) -> None:
+    fake.routes[("GET", "/users/current")] = ok({"code": 0, "user": {
+        "id": 42, "login": "me", "real_name": "Ana", "city_id": 1, "country_id": 7, "about": "old",
+        "is_location_public": True, "is_on_holiday": False, "international_trading_enabled": False}})
+    fake.routes[("GET", "/countries/7/cities")] = ok({"code": 0, "cities": [{"id": 9, "title": "Vigo"}, {"id": 8, "title": "Vigo (Dodro)"}]})
+    fake.routes[("PUT", "/users/current")] = ok({"code": 0, "user": {}})
+    assert client.update_profile(about="hola", city="vigo").ok
+    user = fake.calls[-1]["json"]["user"]
+    assert user["text_about"] == "hola" and user["city_id"] == 9 and user["real_name"] == "Ana" and user["login"] == "me"
+    assert user["user_settings"] == {"is_location_public": True, "on_holiday": False, "international_trading_enabled": False}
+    with pytest.raises(ValueError):
+        client.update_profile()
+
+
+def test_block_and_unblock(client: Vinted, fake: FakeTransport) -> None:
+    fake.routes[("POST", "/users/42/user_hates")] = ok({"code": 0})
+    fake.routes[("DELETE", "/users/42/user_hates")] = ok({"code": 0})
+    client.block_user(7)
+    assert fake.calls[-1]["json"] == {"hated_user_id": 7}
+    client.block_user(7, False)
+    assert fake.calls[-1]["method"] == "DELETE" and fake.calls[-1]["params"] == {"hated_user_id": 7}
+
+
+def test_reply_with_photo(client: Vinted, fake: FakeTransport, tmp_path) -> None:
+    f = tmp_path / "p.jpg"
+    f.write_bytes(b"x")
+    fake.routes[("POST", "/api/v2/photos")] = ok({"id": 1, "temp_uuid": "tu-1", "code": 0})
+    fake.routes[("POST", "/conversations/c/replies")] = ok({"id": "m"}, 201)
+    assert client.reply("c", "", photo_paths=[str(f)]).ok
+    assert fake.calls[-1]["json"] == {"content": None, "is_personal_data_sharing_check_skipped": False,
+                                      "photo_temp_uuids": ["tu-1"]}
+    with pytest.raises(ValueError):
+        client.reply("c", "  ")

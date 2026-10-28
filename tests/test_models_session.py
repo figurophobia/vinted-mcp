@@ -134,61 +134,118 @@ def test_offer_events() -> None:
     assert ev[1]["id"] == 5 and ev[1]["price"] == "37.0" and "status" not in ev[1]
 
 
-def _tok(sub, exp_in):
+def _tok(sub, exp_in, iat=None):
     import base64
     import time
 
-    body = base64.urlsafe_b64encode(json.dumps({"sub": sub, "exp": int(time.time()) + exp_in}).encode()).decode().rstrip("=")
+    now = int(time.time())
+    payload = {"sub": sub, "exp": now + exp_in, "iat": now if iat is None else iat}
+    body = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
     return f"h.{body}.s"
 
 
-def _recovery_client(fresh, refresh_ok):
+T0 = 1_700_000_000  # issue times: smaller = older
+
+
+def _recovery_client(refresh_status):
+    """Client holding tokens issued at T0+100; ``refresh_status(fake)`` decides the refresh answer."""
     from vinted_mcp.client import Vinted
     from vinted_mcp.http import Response
 
     from .conftest import FakeTransport
 
-    fake = FakeTransport(cookies={"access_token_web": _tok("1", -10), "refresh_token_web": "old"})
-    fake.routes[("POST", "/web/api/auth/refresh")] = lambda call: (
-        Response(200, {}, set_cookies={"access_token_web": _tok("1", 3600), "refresh_token_web": "rotated"})
-        if refresh_ok(fake) else Response(400, {}))
+    fake = FakeTransport(cookies={"access_token_web": _tok("1", -10, T0 + 100),
+                                  "refresh_token_web": _tok("1", 600000, T0 + 100)})
+
+    def answer(call):
+        status = refresh_status(fake)
+        if status == 200:
+            return Response(200, {}, set_cookies={"access_token_web": _tok("1", 3600, T0 + 500),
+                                                  "refresh_token_web": _tok("1", 604800, T0 + 500)})
+        return Response(status, {} if status != 403 else "<html>blocked</html>")
+
+    fake.routes[("POST", "/web/api/auth/refresh")] = answer
     return Vinted(domain="es", transport=fake), fake
+
+
+def _refreshes(fake):
+    return sum("auth/refresh" in c["url"] for c in fake.calls)
 
 
 def test_recover_adopts_newer_browser_token_without_refreshing(monkeypatch) -> None:
     from vinted_mcp import session as s
 
-    newer = _tok("1", 3000)
-    monkeypatch.setattr(s, "read_browser_cookies", lambda *a: {"access_token_web": newer, "refresh_token_web": "b"})
-    v, fake = _recovery_client(None, lambda f: True)
+    newer = {"access_token_web": _tok("1", 3000, T0 + 300), "refresh_token_web": _tok("1", 600000, T0 + 300)}
+    monkeypatch.setattr(s, "read_browser_cookies", lambda *a: dict(newer))
+    v, fake = _recovery_client(lambda f: 200)
     assert s.recover_session(v, "firefox", "es") is True
-    assert fake.cookie("access_token_web") == newer and fake.cookie("refresh_token_web") == "b"
-    assert not any("refresh" in c["url"] for c in fake.calls)
+    assert fake.cookie("access_token_web") == newer["access_token_web"] and _refreshes(fake) == 0
+
+
+def test_recover_never_adopts_older_browser_tokens(monkeypatch) -> None:
+    from vinted_mcp import session as s
+
+    # Still-valid access token but issued before ours: adopting it would bring back a rotated refresh token.
+    older = {"access_token_web": _tok("1", 3000, T0 + 50), "refresh_token_web": _tok("1", 600000, T0 + 50)}
+    monkeypatch.setattr(s, "read_browser_cookies", lambda *a: dict(older))
+    v, fake = _recovery_client(lambda f: 401)
+    assert s.recover_session(v, "firefox", "es") is False
+    assert fake.cookie("refresh_token_web") != older["refresh_token_web"] and _refreshes(fake) == 1
 
 
 def test_recover_refreshes_when_browser_has_nothing_newer(monkeypatch) -> None:
     from vinted_mcp import session as s
 
     monkeypatch.setattr(s, "read_browser_cookies", lambda *a: {})
-    v, fake = _recovery_client(None, lambda f: True)
+    v, fake = _recovery_client(lambda f: 200)
     assert s.recover_session(v, "firefox", "es") is True
-    assert fake.cookie("refresh_token_web") == "rotated"
+    assert _jwt_iat(fake.cookie("refresh_token_web")) == T0 + 500
 
 
-def test_recover_uses_browser_rotated_refresh_token(monkeypatch) -> None:
+def test_recover_uses_newer_browser_refresh_token_after_rejection(monkeypatch) -> None:
     from vinted_mcp import session as s
 
+    browser_rt = _tok("1", 600000, T0 + 300)
     monkeypatch.setattr(s, "read_browser_cookies",
-                        lambda *a: {"access_token_web": _tok("1", -5), "refresh_token_web": "browser-new"})
-    v, fake = _recovery_client(None, lambda f: f.cookie("refresh_token_web") == "browser-new")
+                        lambda *a: {"access_token_web": _tok("1", -5, T0 + 300), "refresh_token_web": browser_rt})
+    v, fake = _recovery_client(lambda f: 200 if f.cookie("refresh_token_web") == browser_rt else 401)
     assert s.recover_session(v, "firefox", "es") is True
-    assert fake.cookie("refresh_token_web") == "rotated"
-    assert sum("refresh" in c["url"] for c in fake.calls) == 2
+    assert _refreshes(fake) == 2 and _jwt_iat(fake.cookie("refresh_token_web")) == T0 + 500
+
+
+def test_recover_does_not_switch_tokens_on_transient_failure(monkeypatch) -> None:
+    from vinted_mcp import session as s
+
+    browser_rt = _tok("1", 600000, T0 + 300)
+    monkeypatch.setattr(s, "read_browser_cookies",
+                        lambda *a: {"access_token_web": _tok("1", -5, T0 + 300), "refresh_token_web": browser_rt})
+    v, fake = _recovery_client(lambda f: 403)  # DataDome page, not a token rejection
+    assert s.recover_session(v, "firefox", "es") is False
+    assert fake.cookie("refresh_token_web") != browser_rt and _refreshes(fake) == 1
 
 
 def test_recover_ignores_other_users_token(monkeypatch) -> None:
     from vinted_mcp import session as s
 
-    monkeypatch.setattr(s, "read_browser_cookies", lambda *a: {"access_token_web": _tok("999", 3000)})
-    v, fake = _recovery_client(None, lambda f: False)
+    monkeypatch.setattr(s, "read_browser_cookies",
+                        lambda *a: {"access_token_web": _tok("999", 3000, T0 + 300),
+                                    "refresh_token_web": _tok("999", 600000, T0 + 300)})
+    v, fake = _recovery_client(lambda f: 401)
     assert s.recover_session(v, "firefox", "es") is False
+
+
+def test_wizard_sessions_do_not_read_the_profile(tmp_path) -> None:
+    from vinted_mcp import config
+    from vinted_mcp.session import build_client
+
+    path = str(tmp_path / "s.json")
+    config.save_session({"domain": "es", "source": "wizard",
+                         "cookies": {"access_token_web": _tok("1", 3600), "refresh_token_web": "r"}}, path)
+    v = build_client(path=path)
+    assert v.http.on_unauthorized == v.refresh
+
+
+def _jwt_iat(tok):
+    from vinted_mcp.session import _jwt
+
+    return _jwt(tok).get("iat")

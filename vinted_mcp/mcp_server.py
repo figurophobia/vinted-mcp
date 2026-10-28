@@ -146,6 +146,13 @@ def list_categories(query: Optional[str] = None, leaves_only: bool = False, limi
     return cats[: max(1, min(limit, 500))]
 
 
+def find_city(name: str, country_id: Optional[int] = None) -> dict:
+    """City ids for update_profile (defaults to your country)."""
+    _require_session()
+    with _lock:
+        return _resp(_c().cities(name, country_id))
+
+
 def find_brand(keyword: str, category_id: Optional[int] = None) -> dict:
     """Brand ids for listing (publish_item brand_id)."""
     with _lock:
@@ -287,6 +294,13 @@ def get_offer_status(conversation_id: str) -> dict:
     })
 
 
+def item_stats(item: str) -> dict:
+    """Views and favourites of one of your listings, who favourited it, and daily bump stats when bumped."""
+    _require_session()
+    with _lock:
+        return _jsonable(_c().item_stats(item))
+
+
 def list_item_likers(item: Optional[str] = None) -> list:
     """Members who favourited your listings (optionally one item): item_id, user_id, login, when. Built from like notifications, so only recent likes appear."""
     _require_session()
@@ -363,15 +377,16 @@ def toggle_follow(user: str) -> dict:
         return _resp(_c().toggle_follow(user))
 
 
-def send_message(text: str, conversation_id: Optional[str] = None, item: Optional[str] = None) -> dict:
-    """Reply in a conversation (conversation_id), or message the seller of an item (item) creating the conversation."""
+def send_message(text: str = "", conversation_id: Optional[str] = None, item: Optional[str] = None,
+                 photo_paths: Optional[list[str]] = None) -> dict:
+    """Reply in a conversation (conversation_id), or message the seller of an item (item) creating the conversation. photo_paths attaches local images."""
     _require_session()
     with _lock:
         if conversation_id:
-            return _resp(_c().reply(conversation_id, text))
+            return _resp(_c().reply(conversation_id, text, photo_paths=photo_paths))
         if not item:
             raise ValueError("provide conversation_id (reply) or item (message the seller)")
-        return _resp(_c().message_item(item, text))
+        return _resp(_c().message_item(item, text, photo_paths=photo_paths))
 
 
 def make_offer(item: str, price: float, transaction_id: Optional[int] = None) -> dict:
@@ -445,7 +460,7 @@ def publish_item(
     price: float,
     catalog_id: int,
     condition: Condition,
-    photo_paths: list[str],
+    photo_paths: Optional[list[str]] = None,
     brand_id: Optional[int] = None,
     brand: Optional[str] = None,
     size_id: Optional[int] = None,
@@ -453,12 +468,14 @@ def publish_item(
     package_size_id: Optional[int] = None,
     attributes: Optional[dict[str, list[int]]] = None,
     draft: bool = False,
+    photo_ids: Optional[list[int]] = None,
+    upload_session_id: Optional[str] = None,
 ) -> dict:
     """Publish a listing (or save a draft). Use suggest_category/list_categories for a leaf catalog_id, then listing_options for its required attributes (e.g. {"video_game_platform": [1265]}) and package_size_id. Vinted deletes listings it considers duplicates of one already online, so never publish the same item twice."""
     _require_session()
     with _lock:
         return _resp(_c().publish(
-            photo_paths=photo_paths, draft=draft, title=title, description=description, price=price,
+            photo_paths=photo_paths, photo_ids=photo_ids, upload_session_id=upload_session_id, draft=draft, title=title, description=description, price=price,
             catalog_id=catalog_id, condition=condition, brand_id=brand_id, brand=brand, size_id=size_id,
             color_ids=color_ids, package_size_id=package_size_id, attributes=attributes,
         ))
@@ -521,6 +538,88 @@ def delete_item(item: str) -> dict:
         return _resp(_c().delete_item(_iid(item)))
 
 
+def publish_draft(draft_id: int, price: Optional[float] = None, title: Optional[str] = None,
+                  description: Optional[str] = None) -> dict:
+    """Publish one of your drafts, optionally changing price/title/description first."""
+    _require_session()
+    changes = {k: v for k, v in dict(price=price, title=title, description=description).items() if v is not None}
+    with _lock:
+        return _resp(_c().publish_draft(draft_id, **changes))
+
+
+def update_profile(about: Optional[str] = None, city: Optional[str] = None, city_id: Optional[int] = None,
+                   show_city: Optional[bool] = None, photo_path: Optional[str] = None,
+                   real_name: Optional[str] = None) -> dict:
+    """Edit your profile: bio (about), city (name or city_id from find_city), whether the city is shown, real name or profile photo. Other fields are kept."""
+    _require_session()
+    with _lock:
+        return _resp(_c().update_profile(about=about, city=city, city_id=city_id, show_city=show_city,
+                                         photo_path=photo_path, real_name=real_name))
+
+
+def block_user(user: str, blocked: bool = True) -> dict:
+    """Block a member (they can no longer message you or buy from you), or unblock with blocked=false."""
+    _require_session()
+    with _lock:
+        return _resp(_c().block_user(user, blocked))
+
+
+def set_holiday_mode(on: bool) -> dict:
+    """Holiday mode: on hides your whole closet, off brings it back. The rest of the profile is kept as is."""
+    _require_session()
+    with _lock:
+        return _resp(_c().set_holiday(on))
+
+
+def set_bundle_discounts(enabled: bool, tiers: Optional[dict[int, float]] = None) -> dict:
+    """Bundle discounts: tiers maps minimum items to percent off, e.g. {2: 5, 3: 10}. Vinted uses tiers for 2, 3 and 5 items."""
+    _require_session()
+    with _lock:
+        return _resp(_c().set_bundle_discounts(enabled, {int(k): float(v) for k, v in (tiers or {}).items()}))
+
+
+# --- agent automation ------------------------------------------------------
+
+def listing_from_photos(
+    photo_paths: list[str],
+    title: Optional[str] = None,
+    description: Optional[str] = None,
+    brand: Optional[str] = None,
+    condition: Optional[Condition] = None,
+    catalog_id: Optional[int] = None,
+) -> dict:
+    """Upload photos once and propose a listing: category guessed from the photos, required attributes, brand, package sizes and prices (Vinted's recommendation, similar sold items, active listings). Look at the photos yourself for title/condition, confirm with the user, then call publish_item with the returned photo_ids and upload_session_id."""
+    from . import automation
+
+    _require_session()
+    with _lock:
+        return _jsonable(automation.listing_from_photos(
+            _c(), photo_paths, title=title, description=description, brand=brand, condition=condition,
+            catalog_id=catalog_id))
+
+
+def negotiate_offer(conversation_id: str, floor: float, steps: int = 3, dry_run: bool = True,
+                    messages: Optional[dict[str, str]] = None) -> dict:
+    """Seller auto-negotiation, one step: accept a pending offer >= floor, otherwise reject and counter down a concession ladder (never below floor), or remind the buyer of the current price. Buyer messages that try to give instructions are reported in ignored_instructions and never followed. dry_run (default) only plans; messages can override the accept/counter/final/remind templates ({price}, {offer})."""
+    from . import automation
+
+    _require_session()
+    with _lock:
+        return _jsonable(automation.negotiate(_c(), conversation_id, floor=floor, steps=steps, messages=messages,
+                                              dry_run=dry_run))
+
+
+def relist_item(item: str, photo_paths: Optional[list[str]] = None, price: Optional[float] = None,
+                title: Optional[str] = None, description: Optional[str] = None, dry_run: bool = True) -> dict:
+    """Take a listing down and publish it again (new photos recommended: re-used photos may be flagged as a duplicate). Waits for the old listing to disappear before publishing. dry_run (default) shows what would be published."""
+    from . import automation
+
+    _require_session()
+    changes = {k: v for k, v in dict(price=price, title=title, description=description).items() if v is not None}
+    with _lock:
+        return _jsonable(automation.relist(_c(), item, photo_paths=photo_paths, dry_run=dry_run, **changes))
+
+
 def delete_draft(draft_id: int) -> dict:
     """Delete one of your drafts (ids from my_items entries with status.is_draft)."""
     _require_session()
@@ -536,16 +635,17 @@ def save_search(search_id: int, saved: bool = True) -> dict:
 
 
 _READ_TOOLS = [
-    session_status, whoami, search, search_filters, suggest, list_categories, suggest_category, find_brand,
+    session_status, whoami, search, search_filters, suggest, list_categories, suggest_category, find_brand, find_city,
     listing_options, get_item, similar_items, get_user,
-    my_items, list_favourites, list_inbox, get_conversation, get_offer_status, list_item_likers, unread_counts, list_notifications, list_orders,
+    my_items, list_favourites, list_inbox, get_conversation, get_offer_status, list_item_likers, item_stats, unread_counts, list_notifications, list_orders,
     get_transaction, wallet, list_saved_searches, offer_options,
 ]
 _WRITE_TOOLS = [
     set_favourite, toggle_follow, send_message, make_offer, respond_offer, counter_offer, offer_to_liker,
     message_all_likers,
     mark_conversation_read, delete_message, delete_conversation,
-    publish_item, edit_item, set_item_hidden, reserve_item, delete_item, delete_draft, save_search,
+    publish_item, publish_draft, edit_item, set_item_hidden, reserve_item, delete_item, delete_draft, save_search,
+    update_profile, block_user, set_holiday_mode, set_bundle_discounts, listing_from_photos, negotiate_offer, relist_item,
 ]
 
 

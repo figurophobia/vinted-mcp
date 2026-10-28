@@ -24,7 +24,7 @@ from typing import Any, Callable, Iterable, Optional
 from curl_cffi import CurlMime
 
 from . import config as _cfg
-from .http import ApiError, Response, Transport
+from .http import ApiError, Response, Transport, TransportError
 from .ids import item_id as _item_id
 from .ids import user_id as _user_id
 from .models import Item, item_details_from_page, item_from_api
@@ -55,6 +55,7 @@ class Vinted:
         self.http.on_unauthorized = self.refresh
         self.persist_fn = persist_fn
         self._me: Optional[dict] = None
+        self.last_refresh_rejected = False
 
     # -- session -----------------------------------------------------------
 
@@ -63,11 +64,21 @@ class Vinted:
         return bool(self.http.cookie("access_token_web") or self.http.cookie("refresh_token_web"))
 
     def refresh(self) -> bool:
-        """Mint a new ``access_token_web`` from ``refresh_token_web``. Returns success."""
+        """Mint a new ``access_token_web`` from ``refresh_token_web``. Returns success.
+
+        ``last_refresh_rejected`` tells apart "Vinted rejected the token" (400/401)
+        from transient failures (anti-bot 403, 5xx, network), where retrying
+        with another token would be wrong.
+        """
+        self.last_refresh_rejected = False
         if not self.http.cookie("refresh_token_web"):
             return False
-        r = self.http.request("POST", f"{self.web}/web/api/auth/refresh", retry_auth=False)
+        try:
+            r = self.http.request("POST", f"{self.web}/web/api/auth/refresh", retry_auth=False)
+        except TransportError:
+            return False
         if r.status >= 300:
+            self.last_refresh_rejected = r.status in (400, 401)
             return False
         for name, value in r.set_cookies.items():
             if name in _cfg.AUTH_COOKIES and value:
@@ -371,23 +382,31 @@ class Vinted:
                 raise ApiError(f"could not find the seller of item {iid}")
         return self.send("POST", "edge", "/messaging/main/inquiries", {"item_ids": [str(iid)], "receiver_id": str(seller_id)})
 
-    def reply(self, conversation_id: str, text: str, photo_temp_uuids: Optional[list[str]] = None) -> Response:
-        """Send a message in an existing conversation."""
+    def reply(self, conversation_id: str, text: str = "", photo_temp_uuids: Optional[list[str]] = None,
+              photo_paths: Optional[list[str]] = None) -> Response:
+        """Send a message (text and/or photos) in an existing conversation."""
         self._require_login()
-        if not text.strip():
+        uuids = list(photo_temp_uuids or [])
+        for p in photo_paths or []:
+            r = self._upload_photo_of_type(p, "user_msg")
+            if not r.ok:
+                return r
+            uuids.append(r.data["temp_uuid"])
+        photo_temp_uuids = uuids
+        if not text.strip() and not photo_temp_uuids:
             raise ValueError("empty message")
         return self.send("POST", "edge", f"/messaging/main/conversations/{conversation_id}/replies", {
-            "content": text,
+            "content": text or None,
             "is_personal_data_sharing_check_skipped": False,
-            "photo_temp_uuids": photo_temp_uuids or [],
+            "photo_temp_uuids": photo_temp_uuids or None,
         })
 
-    def message_item(self, ref: str | int, text: str) -> Response:
+    def message_item(self, ref: str | int, text: str, photo_paths: Optional[list[str]] = None) -> Response:
         """Message the seller of an item (creates the conversation when needed)."""
         conv = self.start_conversation(ref)
         if not conv.ok:
             return conv
-        r = self.reply(str(conv.data["conversation_id"]), text)
+        r = self.reply(str(conv.data["conversation_id"]), text, photo_paths=photo_paths)
         if isinstance(r.data, dict):
             r.data.setdefault("conversation_id", conv.data.get("conversation_id"))
             r.data.setdefault("transaction_id", conv.data.get("transaction_id"))
@@ -709,20 +728,29 @@ class Vinted:
             item["size_id"] = int(size_id)
         return item
 
-    def publish(self, *, photo_paths: list[str], draft: bool = False, **fields: Any) -> Response:
+    def publish(self, *, photo_paths: Optional[list[str]] = None, draft: bool = False,
+                photo_ids: Optional[list[int]] = None, upload_session_id: Optional[str] = None,
+                **fields: Any) -> Response:
         """Upload photos and create the listing (or a draft with ``draft=True``).
+
+        Photos already uploaded (e.g. by :func:`automation.listing_from_photos`)
+        can be reused with ``photo_ids`` + their ``upload_session_id``.
 
         ``fields`` are :meth:`build_item` keyword arguments (minus photo ids /
         temp uuid). If the photo uploads succeed but the final POST fails the
         returned response carries ``data["photo_ids"]`` so nothing is lost.
         """
         self._require_login()
-        if not photo_paths:
+        if photo_ids:
+            if not upload_session_id:
+                raise ValueError("photo_ids need the upload_session_id they were uploaded with")
+            photo_paths = []
+        elif not photo_paths:
             raise ValueError("at least one photo is required")
-        if len(photo_paths) > 20:
+        if len(photo_paths) > 20 or len(photo_ids or []) > 20:
             raise ValueError("Vinted accepts at most 20 photos")
-        temp_uuid = str(uuid.uuid4())
-        photo_ids: list[int] = []
+        temp_uuid = upload_session_id or str(uuid.uuid4())
+        photo_ids = [int(i) for i in photo_ids or []]
         for p in photo_paths:
             r = self.upload_photo(p, temp_uuid)
             if not r.ok:
@@ -746,8 +774,8 @@ class Vinted:
 
         Accepted keys: ``title``, ``description``, ``price``, ``catalog_id``,
         ``condition``, ``brand_id``/``brand``, ``size_id``, ``color_ids``,
-        ``package_size_id``, ``attributes`` (merged by code), ``photo_paths``
-        (replaces the photos).
+        ``package_size_id``, ``attributes`` (merged by code), ``isbn``,
+        ``photo_paths`` (replaces the photos).
         """
         self._require_login()
         unknown = set(changes) - _EDITABLE
@@ -764,6 +792,15 @@ class Vinted:
                 if not r.ok:
                     return r
                 photo_ids.append(int(r.data["id"]))
+        changes.pop("photo_paths", None)
+        item = self._merged_item(iid, cur, changes, temp_uuid, photo_ids)
+        return self.send("PUT", "core", f"/item_upload/items/{iid}",
+                         {"item": item, "push_up": False, "parcel": None, "upload_session_id": temp_uuid},
+                         headers={"X-Upload-Form": "true"})
+
+    def _merged_item(self, iid: int, cur: dict, changes: dict, temp_uuid: str, photo_ids: list[int]) -> dict:
+        """The upload body for ``cur`` (an ``item_upload`` item) with ``changes`` applied."""
+        changes = dict(changes)
         attrs = {a["code"]: a.get("ids") or [] for a in cur.get("item_attributes") or [] if a.get("code")}
         attrs.update(changes.pop("attributes", None) or {})
         condition = changes.pop("condition", None) or (attrs.pop("condition", [None]) or [None])[0] or cur.get("status_id")
@@ -772,7 +809,7 @@ class Vinted:
         if price is None:
             pm = cur.get("price")
             price = pm.get("amount") if isinstance(pm, dict) else pm
-        item = self.build_item(
+        return self.build_item(
             title=changes.pop("title", cur.get("title")),
             description=changes.pop("description", cur.get("description")),
             price=float(price),
@@ -790,9 +827,6 @@ class Vinted:
             currency=cur.get("currency") or "EUR",
             item_id=iid,
         )
-        return self.send("PUT", "core", f"/item_upload/items/{iid}",
-                         {"item": item, "push_up": False, "parcel": None, "upload_session_id": temp_uuid},
-                         headers={"X-Upload-Form": "true"})
 
     def delete_item(self, ref: str | int) -> Response:
         """Permanently delete one of your listings."""
@@ -818,13 +852,170 @@ class Vinted:
         r = self.user_items(self.my_id(), per_page=96).raise_for_error()
         return [i for i in r.data.get("items") or [] if i.get("is_draft")]
 
+    def publish_draft(self, draft_id: int, **changes: Any) -> Response:
+        """Publish an existing draft (``POST /item_upload/drafts/{id}/completion``), optionally changing fields first.
+
+        Accepts the same keys as :meth:`edit_item` (minus ``photo_paths``).
+        """
+        self._require_login()
+        unknown = set(changes) - (_EDITABLE - {"photo_paths"})
+        if unknown:
+            raise ValueError(f"unknown fields: {', '.join(sorted(unknown))}")
+        did = int(draft_id)
+        cur = self.item_draft(did).raise_for_error().data.get("item") or {}
+        temp_uuid = str(uuid.uuid4())
+        draft = self._merged_item(did, cur, changes, temp_uuid,
+                                  [int(p["id"]) for p in cur.get("photos") or [] if p.get("id")])
+        return self.send("POST", "core", f"/item_upload/drafts/{did}/completion",
+                         {"draft": draft, "push_up": False, "parcel": None, "upload_session_id": temp_uuid})
+
     def delete_draft(self, draft_id: int) -> Response:
         self._require_login()
         return self.send("DELETE", "core", f"/item_upload/drafts/{int(draft_id)}")
 
     def bundle_discounts(self) -> Response:
+        """Bundle discount settings: ``{enabled, tiers: [{discount_value, min_items}]}``."""
         self._require_login()
         return self.get("edge", "/messaging/bundles/discounts/settings")
+
+    def set_bundle_discounts(self, enabled: bool, tiers: Optional[dict[int, float]] = None) -> Response:
+        """Set "X% off when buying N or more" tiers, e.g. ``{2: 5, 3: 10}`` (min items -> percent)."""
+        self._require_login()
+        body_tiers = []
+        for min_items, pct in sorted((tiers or {}).items()):
+            if not 0 < float(pct) < 100 or int(min_items) < 2:
+                raise ValueError("tiers are {min_items >= 2: percent between 0 and 100}")
+            body_tiers.append({"discount_value": f"{float(pct) / 100:.2f}", "min_items": int(min_items)})
+        if enabled and not body_tiers:
+            raise ValueError("enabling bundle discounts needs at least one tier")
+        return self.send("PUT", "edge", "/messaging/bundles/discounts/settings", {"enabled": bool(enabled), "tiers": body_tiers})
+
+    def _profile_body(self, me: dict, **overrides: Any) -> dict:
+        """The full ``PUT /users/current`` body: current values with ``overrides`` applied."""
+        settings = me.get("user_settings") or {}
+        user = {
+            "real_name": me.get("real_name"),
+            "city_id": me.get("city_id"),
+            "country_id": me.get("country_id"),
+            "gender": me.get("gender"),
+            "birthday": me.get("birthday"),
+            "text_about": me.get("about"),
+            "login": me.get("login"),
+            "photo_temp_uuid": None,
+            "user_settings": {
+                "is_location_public": settings.get("is_location_public", me.get("is_location_public")),
+                "on_holiday": settings.get("on_holiday", me.get("is_on_holiday")),
+                "international_trading_enabled": settings.get("international_trading_enabled",
+                                                              me.get("international_trading_enabled")),
+            },
+        }
+        for k, v in overrides.items():
+            if k in user["user_settings"]:
+                user["user_settings"][k] = v
+            else:
+                user[k] = v
+        return {"user": user}
+
+    def set_holiday(self, on: bool) -> Response:
+        """Holiday mode: hides your whole closet (``on=True``) or brings it back.
+
+        Turning it on goes through the profile update (``PUT /users/current``),
+        which rewrites the whole profile, so the current values are sent back
+        unchanged. Turning it off is ``DELETE /users/{id}/holiday``.
+        """
+        self._require_login()
+        me = self.me(fresh=True)
+        if not on:
+            return self.send("DELETE", "core", f"/users/{me['id']}/holiday")
+        return self.send("PUT", "core", "/users/current", self._profile_body(me, on_holiday=True))
+
+    def cities(self, search: str, country_id: Optional[int] = None) -> Response:
+        """City lookup for the profile (``data.cities: [{id, title}]``); defaults to your country."""
+        cid = country_id or self.me().get("country_id")
+        return self.get("core", f"/countries/{int(cid)}/cities", {"search_text": search})
+
+    def update_profile(
+        self,
+        *,
+        about: Optional[str] = None,
+        city: Optional[str] = None,
+        city_id: Optional[int] = None,
+        show_city: Optional[bool] = None,
+        photo_path: Optional[str] = None,
+        real_name: Optional[str] = None,
+    ) -> Response:
+        """Change your bio (``about``), city (by name or id), city visibility, real name or profile photo.
+
+        Only the given fields change; the rest of the profile is sent back as is.
+        """
+        self._require_login()
+        me = self.me(fresh=True)
+        overrides: dict[str, Any] = {}
+        if about is not None:
+            overrides["text_about"] = about
+        if real_name is not None:
+            overrides["real_name"] = real_name
+        if show_city is not None:
+            overrides["is_location_public"] = bool(show_city)
+        if city is not None and city_id is None:
+            found = (self.cities(city).raise_for_error().data or {}).get("cities") or []
+            exact = [c for c in found if (c.get("title") or "").lower() == city.lower()]
+            if not (exact or found):
+                raise ApiError(f"no city matches {city!r}")
+            city_id = (exact or found)[0]["id"]
+        if city_id is not None:
+            overrides["city_id"] = int(city_id)
+        if photo_path:
+            r = self._upload_photo_of_type(photo_path, "user")
+            if not r.ok:
+                return r
+            overrides["photo_temp_uuid"] = r.data.get("temp_uuid")
+        if not overrides:
+            raise ValueError("nothing to change")
+        r = self.send("PUT", "core", "/users/current", self._profile_body(me, **overrides))
+        if r.ok:
+            self._me = None
+        return r
+
+    def _upload_photo_of_type(self, path: str, photo_type: str) -> Response:
+        """``POST /photos`` with ``photo[type]`` (``user`` = avatar, ``user_msg`` = chat photo); returns ``temp_uuid``."""
+        if not os.path.isfile(path):
+            raise ApiError(f"photo not found: {path}")
+        mp = CurlMime()
+        mp.addpart(name="photo[type]", data=photo_type.encode())
+        mp.addpart(name="photo[file]", content_type=mimetypes.guess_type(path)[0] or "image/jpeg",
+                   filename=os.path.basename(path), local_path=path)
+        try:
+            return self.http.request("POST", f"{self.core}/photos", multipart=mp)
+        finally:
+            mp.close()
+
+    def block_user(self, ref: str | int, blocked: bool = True) -> Response:
+        """Block (or with ``blocked=False`` unblock) a member: they cannot message you or buy from you."""
+        self._require_login()
+        uid = _user_id(ref)
+        if blocked:
+            return self.send("POST", "core", f"/users/{self.my_id()}/user_hates", {"hated_user_id": uid})
+        return self.http.request("DELETE", f"{self.core}/users/{self.my_id()}/user_hates", params={"hated_user_id": uid})
+
+    def item_stats(self, ref: str | int) -> dict:
+        """Views and favourites of one of your listings, who liked it, and daily bump stats when it was bumped."""
+        iid = _item_id(ref)
+        r = self.user_items(self.my_id(), per_page=96).raise_for_error()
+        it = next((i for i in r.data.get("items") or [] if int(i["id"]) == iid), None)
+        if it is None:
+            raise ApiError(f"item {iid} is not one of your listings")
+        out: dict[str, Any] = {
+            "item_id": iid,
+            "title": it.get("title"),
+            "views": it.get("view_count"),
+            "favourites": it.get("favourite_count"),
+            "likers": [{k: l[k] for k in ("user_id", "login", "at")} for l in self.item_likers(iid)],
+        }
+        b = self.get("edge", f"/vas/items/{iid}/bumps/stats", {"timezone": "Europe/Madrid"})
+        if b.ok:
+            out["bump_stats"] = b.data
+        return out
 
 
 #: Notification ``entry_type`` for "<user> favourited your item".

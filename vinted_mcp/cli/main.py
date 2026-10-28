@@ -200,10 +200,11 @@ def cmd_conversation(args: argparse.Namespace) -> None:
 
 def cmd_message(args: argparse.Namespace) -> None:
     v = _client(args)
+    photos = _photos(args.photo) if args.photo else None
     if args.conversation:
-        _out(args, v.reply(args.conversation, args.text))
+        _out(args, v.reply(args.conversation, args.text, photo_paths=photos))
     elif args.item:
-        _out(args, v.message_item(args.item, args.text))
+        _out(args, v.message_item(args.item, args.text, photo_paths=photos))
     else:
         raise SystemExit("error: pass --conversation <id> or --item <id>")
 
@@ -307,6 +308,66 @@ def cmd_reserve(args: argparse.Namespace) -> None:
         _out(args, v.reserve(args.transaction, True))
 
 
+def cmd_profile(args: argparse.Namespace) -> None:
+    v = _client(args)
+    if args.find_city:
+        _out(args, v.cities(args.find_city))
+        return
+    show = None if args.show_city is None else args.show_city == "yes"
+    _out(args, v.update_profile(about=args.about, city=args.city, show_city=show, photo_path=args.photo,
+                                real_name=args.real_name))
+
+
+def cmd_block(args: argparse.Namespace) -> None:
+    _out(args, _client(args).block_user(args.user, not args.undo))
+
+
+def cmd_stats(args: argparse.Namespace) -> None:
+    _out(args, _client(args).item_stats(args.item))
+
+
+def cmd_holiday(args: argparse.Namespace) -> None:
+    _out(args, _client(args).set_holiday(args.state == "on"))
+
+
+def cmd_bundle(args: argparse.Namespace) -> None:
+    v = _client(args)
+    if args.off:
+        _out(args, v.set_bundle_discounts(False))
+    elif args.tier:
+        tiers = {int(k): float(p) for k, _, p in (t.partition("=") for t in args.tier)}
+        _out(args, v.set_bundle_discounts(True, tiers))
+    else:
+        _out(args, v.bundle_discounts())
+
+
+def cmd_publish_draft(args: argparse.Namespace) -> None:
+    changes = {k: getattr(args, k) for k in ("price", "title") if getattr(args, k) is not None}
+    _out(args, _client(args).publish_draft(args.draft_id, **changes))
+
+
+def cmd_suggest_listing(args: argparse.Namespace) -> None:
+    from ..automation import listing_from_photos
+
+    _out(args, listing_from_photos(_client(args), _photos(args.photos), title=args.title, brand=args.brand,
+                                   condition=args.condition, catalog_id=args.catalog))
+
+
+def cmd_negotiate(args: argparse.Namespace) -> None:
+    from ..automation import negotiate
+
+    _out(args, negotiate(_client(args), args.conversation_id, floor=args.floor, steps=args.steps,
+                         dry_run=not args.send))
+
+
+def cmd_relist(args: argparse.Namespace) -> None:
+    from ..automation import relist
+
+    changes = {k: getattr(args, k) for k in ("price", "title") if getattr(args, k) is not None}
+    _out(args, relist(_client(args), args.item, photo_paths=_photos(args.photos) if args.photos else None,
+                      dry_run=not args.yes, **changes))
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="vinted", description="Vinted from the terminal (no checkout).")
     ap.add_argument("--session", help="session JSON file (default ~/.config/vinted-mcp/session.json)")
@@ -395,8 +456,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--delete", action="store_true", help="delete it from the inbox")
     p.add_argument("--delete-message", metavar="MESSAGE_ID", help="delete one of your messages (numeric entity id)")
 
-    p = add("message", cmd_message, "send a message")
-    p.add_argument("text")
+    p = add("message", cmd_message, "send a message (text and/or --photo)")
+    p.add_argument("text", nargs="?", default="")
+    p.add_argument("--photo", action="append", help="image to attach (repeatable)")
     p.add_argument("--conversation")
     p.add_argument("--item", help="message the seller of this item")
 
@@ -464,6 +526,53 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--package-size", type=int)
     p.add_argument("--attr", action="append")
     p.add_argument("--photos", nargs="+")
+
+    p = add("profile", cmd_profile, "edit your profile (bio, city, photo) or --find-city")
+    p.add_argument("--about", help="bio text")
+    p.add_argument("--city", help="city name")
+    p.add_argument("--show-city", choices=("yes", "no"))
+    p.add_argument("--photo", help="new profile photo")
+    p.add_argument("--real-name")
+    p.add_argument("--find-city", metavar="NAME")
+
+    p = add("block", cmd_block, "block a member (--undo to unblock)")
+    p.add_argument("user")
+    p.add_argument("--undo", action="store_true")
+
+    p = add("stats", cmd_stats, "views, favourites and likers of one of your listings")
+    p.add_argument("item")
+
+    p = add("holiday", cmd_holiday, "holiday mode on/off")
+    p.add_argument("state", choices=("on", "off"))
+
+    p = add("bundle", cmd_bundle, "bundle discounts: show, --tier 2=5 --tier 3=10, or --off")
+    p.add_argument("--tier", action="append", help="min_items=percent")
+    p.add_argument("--off", action="store_true")
+
+    p = add("publish-draft", cmd_publish_draft, "publish one of your drafts")
+    p.add_argument("draft_id", type=int)
+    p.add_argument("--price", type=float)
+    p.add_argument("--title")
+
+    p = add("suggest-listing", cmd_suggest_listing, "upload photos and propose category, attributes and price")
+    p.add_argument("photos", nargs="+")
+    p.add_argument("--title")
+    p.add_argument("--brand")
+    p.add_argument("--condition", choices=list(_cfg.CONDITIONS))
+    p.add_argument("--catalog", type=int)
+
+    p = add("negotiate", cmd_negotiate, "plan (or --send) the next seller move in a conversation")
+    p.add_argument("conversation_id")
+    p.add_argument("--floor", type=float, required=True)
+    p.add_argument("--steps", type=int, default=3)
+    p.add_argument("--send", action="store_true")
+
+    p = add("relist", cmd_relist, "delete and republish a listing (preview unless --yes)")
+    p.add_argument("item")
+    p.add_argument("--photos", nargs="+")
+    p.add_argument("--price", type=float)
+    p.add_argument("--title")
+    p.add_argument("--yes", action="store_true")
 
     p = add("hide", cmd_hide, "hide a listing (--show to unhide)")
     p.add_argument("item")
