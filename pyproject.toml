@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vinted-mcp"
+dynamic = ["version"]
+description = "MCP server for Vinted: search, item details, favourites, messages, offers, orders and listing management for AI agents. Also ships a CLI and a typed Python client."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+keywords = ["vinted", "mcp", "model-context-protocol", "ai-agents", "api", "client", "cli"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Internet :: WWW/HTTP",
+    "Typing :: Typed",
+]
+dependencies = ["mcp>=2", "curl_cffi>=0.10", "cryptography>=42", "secretstorage>=3.3; sys_platform == 'linux'"]
+
+[project.urls]
+Homepage = "https://github.com/figurophobia/vinted-mcp"
+Repository = "https://github.com/figurophobia/vinted-mcp"
+Issues = "https://github.com/figurophobia/vinted-mcp/issues"
+Documentation = "https://github.com/figurophobia/vinted-mcp/blob/main/AGENTS.md"
+
+[project.scripts]
+vinted-mcp = "vinted_mcp.mcp_server:main"
+vinted = "vinted_mcp.cli.main:main"
+
+[project.optional-dependencies]
+browser = ["playwright"]
+test = ["pytest>=8"]
+
+[tool.hatch.version]
+path = "vinted_mcp/config.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["vinted_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = ["vinted_mcp", "tests", "docs", "AGENTS.md", "LICENSE", "README.md"]
+exclude = ["**/__pycache__", "cookies.txt", "session.json", ".env"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
