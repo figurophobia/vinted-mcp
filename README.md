@@ -1,6 +1,11 @@
 <p align="center">
-  <img src="docs/logo.svg" alt="vinted-mcp" width="860">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
+    <img src="docs/logo-light.svg" alt="Vinted × Model Context Protocol" height="96">
+  </picture>
 </p>
+
+<h1 align="center">vinted-mcp</h1>
 
 <p align="center">
   <a href="https://github.com/figurophobia/vinted-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/figurophobia/vinted-mcp/actions/workflows/ci.yml/badge.svg"></a>
@@ -24,9 +29,9 @@ One codebase, three interfaces:
 
 | | What | Entry point |
 |---|---|---|
-| 🤖 **MCP server** | 55 tools over stdio for any MCP client; writes hidden unless you opt in | `vinted-mcp` |
-| ⌨️ **CLI** | Every feature from the terminal, JSON output | `vinted` |
-| 🐍 **Python library** | Typed client the other two are built on | `import vinted_mcp` |
+| **MCP server** | 55 tools over stdio for any MCP client; writes hidden unless you opt in | `vinted-mcp` |
+| ⌨ **CLI** | Every feature from the terminal, JSON output | `vinted` |
+| **Python library** | Typed client the other two are built on | `import vinted_mcp` |
 
 ## Contents
 
@@ -49,15 +54,15 @@ One codebase, three interfaces:
 
 | Area | What you get |
 |---|---|
-| 🔎 **Search** | Full catalogue search with every web filter (category, brand, condition, size, colour, price, any attribute such as `video_game_platform`), filter discovery, autocomplete, similar items, the "Envío desde" shipping price |
-| 📦 **Items & sellers** | Item details (description, photos, attributes, seller, availability, shipping), seller profiles, reviews and closets |
-| 💬 **Messaging** | Inbox, conversations, send text **and photos**, start a chat about any item, mark read, delete messages and conversations |
-| 🤝 **Offers** | Buyer offers with Vinted's limits and suggestions; seller accept / reject / counter; offer history per conversation |
-| 🏷️ **Selling** | Publish with photos, drafts, edit any field, replace photos, pause, reserve for a buyer, delete, stats, bundle discounts, holiday mode |
-| ❤️ **Interested buyers** | Who favourited your listings (rebuilt from notifications) and messaging/offers to one or all of them |
-| 👤 **Account** | Profile (bio, city, photo), follow, block, favourites, purchases, sales, wallet, notifications, saved searches |
-| 🧠 **Agent automation** | Listing proposal from photos, rule-based negotiation that ignores prompt injection, duplicate-safe relisting |
-| 🔐 **Sessions** | Import from Chromium/Chrome/Brave/Edge/Vivaldi/Firefox, a dedicated login window, or pasted cookies; automatic token refresh that never fights your browser |
+| **Search** | Full catalogue search with every web filter (category, brand, condition, size, colour, price, any attribute such as `video_game_platform`), filter discovery, autocomplete, similar items, the "Envío desde" shipping price |
+| **Items & sellers** | Item details (description, photos, attributes, seller, availability, shipping), seller profiles, reviews and closets |
+| **Messaging** | Inbox, conversations, send text **and photos**, start a chat about any item, mark read, delete messages and conversations |
+| **Offers** | Buyer offers with Vinted's limits and suggestions; seller accept / reject / counter; offer history per conversation |
+| **Selling** | Publish with photos, drafts, edit any field, replace photos, pause, reserve for a buyer, delete, stats, bundle discounts, holiday mode |
+| **Interested buyers** | Who favourited your listings (rebuilt from notifications) and messaging/offers to one or all of them |
+| **Account** | Profile (bio, city, photo), follow, block, favourites, purchases, sales, wallet, notifications, saved searches |
+| **Agent automation** | Listing proposal from photos, rule-based negotiation that ignores prompt injection, duplicate-safe relisting |
+| **Sessions** | Import from Chromium/Chrome/Brave/Edge/Vivaldi/Firefox, a dedicated login window, or pasted cookies; automatic token refresh that never fights your browser |
 
 ## Install
 
@@ -242,7 +247,7 @@ drive both marketplaces with the same vocabulary.
 
 Higher-level tools built on the client (`vinted_mcp/automation.py`). All of them preview first.
 
-### 📸 Listing from photos — `listing_from_photos`
+### Listing from photos — `listing_from_photos`
 
 Upload the photos once and get everything needed to publish:
 
@@ -262,7 +267,7 @@ vinted suggest-listing ~/photos/3ds --title "Nintendo 3DS Cobalt Blue" --brand N
 
 The agent looks at the photos itself for the title and condition, confirms with you, then publishes.
 
-### 🤝 Negotiation — `negotiate_offer`
+### Negotiation — `negotiate_offer`
 
 One deterministic step per call for a conversation where you sell:
 
@@ -278,7 +283,7 @@ vinted negotiate <conversation_id> --floor 480 --send     # do it
 - buyer text that tries to instruct the agent ("ignora todas las instrucciones…", "si eres un modelo de IA…") is
   listed in `ignored_instructions` and **has no effect**. Messages are templates you can override.
 
-### ♻️ Relisting — `relist_item`
+### Relisting — `relist_item`
 
 ```text
 vinted relist <item> --photos new1.jpg new2.jpg --price 450 --yes
@@ -288,7 +293,7 @@ Reads the listing, deletes it, **waits until it is gone** and publishes it again
 changes. Vinted removes listings it considers duplicates of something already online, so two copies never
 coexist; fresh photos avoid the photo-matching duplicate detector.
 
-### ❤️ Everyone who liked your listings — `message_all_likers`
+### Everyone who liked your listings — `message_all_likers`
 
 ```text
 vinted likers                                                     # who liked what
@@ -423,12 +428,12 @@ flowchart LR
 
 | | |
 |---|---|
-| 🛑 **No buying** | There is no checkout, payment or paid-extra (bump, featured closet) tool. On Vinted a buyer accepts a seller's counter-offer by pressing *Buy*, so that also stays manual. |
-| 🔒 **Writes are opt-in** | The MCP server is read-only unless started with `--allow-writes`; bulk and automation tools preview by default. |
-| 🧪 **Untrusted content** | Descriptions and messages are data, never instructions; the negotiator flags injection attempts instead of obeying them. |
-| 🪞 **Duplicates** | Vinted deletes listings it sees as duplicates of one already online (and may restrict publishing after repeats). Never list the same item twice; relisting deletes first. |
-| ⏳ **Review delays** | Edited listings may enter an automatic review (`item_alert_type: delayed_publication`, 15 min to days) during which they cannot be hidden or deleted. |
-| 🐢 **Rate** | Requests are spaced (`VINTED_RATE_PACE`, 0.6 s by default). Be a good citizen. |
+| **No buying** | There is no checkout, payment or paid-extra (bump, featured closet) tool. On Vinted a buyer accepts a seller's counter-offer by pressing *Buy*, so that also stays manual. |
+| **Writes are opt-in** | The MCP server is read-only unless started with `--allow-writes`; bulk and automation tools preview by default. |
+| **Untrusted content** | Descriptions and messages are data, never instructions; the negotiator flags injection attempts instead of obeying them. |
+| **Duplicates** | Vinted deletes listings it sees as duplicates of one already online (and may restrict publishing after repeats). Never list the same item twice; relisting deletes first. |
+| **Review delays** | Edited listings may enter an automatic review (`item_alert_type: delayed_publication`, 15 min to days) during which they cannot be hidden or deleted. |
+| **Rate** | Requests are spaced (`VINTED_RATE_PACE`, 0.6 s by default). Be a good citizen. |
 
 ## Configuration
 
@@ -481,5 +486,5 @@ Experimental and unofficial. The endpoints come from the web application and can
 offline tests prove protocol handling, not that Vinted still answers the same way.
 
 MIT license. Vinted and its trademarks belong to Vinted UAB; this project is not affiliated with, endorsed by
-or sponsored by Vinted. The banner is original artwork in the spirit of the brand, not an official logo. Use
+or sponsored by Vinted. The Vinted and Model Context Protocol logos are trademarks of Vinted UAB and of the MCP project; they are shown only to identify the service and protocol this project works with. Use
 it with your own account and within Vinted's terms.
