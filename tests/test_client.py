@@ -72,6 +72,24 @@ def test_publish_uploads_photos_then_posts_item(client: Vinted, fake: FakeTransp
     assert {"code": "video_game_platform", "ids": [1265]} in item["item_attributes"]
 
 
+def test_publish_size_id_in_item_attributes(client: Vinted, fake: FakeTransport, tmp_path) -> None:
+    f = tmp_path / "p.jpg"
+    f.write_bytes(b"x")
+    fake.routes[("POST", "/api/v2/photos")] = ok({"id": 1, "code": 0})
+    fake.routes[("POST", "/api/v2/item_upload/items")] = ok({"item": {"id": 9}, "code": 0})
+    fake.routes[("POST", "/api/v2/item_upload/drafts")] = ok({"draft": {"id": 5}, "code": 0})
+    for draft in (False, True):
+        fake.calls.clear()
+        r = client.publish(
+            photo_paths=[str(f)], draft=draft, title="polo", description="d", price=22,
+            catalog_id=5492, condition="good", size_id=209,
+        )
+        assert r.ok
+        body = fake.calls[-1]["json"]
+        upload = body["draft" if draft else "item"]
+        assert {"code": "size", "ids": [209]} in upload["item_attributes"]
+
+
 def test_publish_draft_endpoint(client: Vinted, fake: FakeTransport, tmp_path) -> None:
     f = tmp_path / "p.jpg"
     f.write_bytes(b"x")
@@ -110,6 +128,20 @@ def test_edit_item_merges_current_state(client: Vinted, fake: FakeTransport) -> 
     assert [p["id"] for p in item["assigned_photos"]] == [11, 12]
     assert {"code": "condition", "ids": [3]} in item["item_attributes"]
     assert {"code": "video_game_platform", "ids": [1265]} in item["item_attributes"]
+
+
+def test_edit_item_keeps_size_from_item_attributes(client: Vinted, fake: FakeTransport) -> None:
+    fake.routes[("GET", "/api/v2/item_upload/items/55")] = ok({"code": 0, "item": {
+        "id": 55, "title": "polo", "description": "d", "catalog_id": 5492, "brand_id": 88,
+        "brand_dto": {"title": "Ralph Lauren"}, "price": {"amount": "22.0", "currency_code": "EUR"},
+        "package_size_id": 1, "currency": "EUR", "photos": [{"id": 11}],
+        "item_attributes": [{"code": "size", "ids": [209]}, {"code": "condition", "ids": [3]}],
+    }})
+    fake.routes[("PUT", "/api/v2/item_upload/items/55")] = ok({"item": {"id": 55}, "code": 0})
+    r = client.edit_item(55, price=20)
+    assert r.ok
+    item = fake.calls[-1]["json"]["item"]
+    assert {"code": "size", "ids": [209]} in item["item_attributes"]
 
 
 def test_edit_item_rejects_unknown_fields(client: Vinted, fake: FakeTransport) -> None:
