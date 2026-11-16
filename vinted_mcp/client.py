@@ -695,6 +695,8 @@ class Vinted:
         isbn: Optional[str] = None,
         currency: str = "EUR",
         item_id: Optional[int] = None,
+        measurement_width: Optional[float | str] = None,
+        measurement_length: Optional[float | str] = None,
     ) -> dict:
         """The ``item`` object the upload form posts."""
         item_attributes = [{"code": k, "ids": [int(i) for i in v]} for k, v in (attributes or {}).items() if k != "condition"]
@@ -718,8 +720,8 @@ class Vinted:
                 {"id": int(pid), "orientation": 0, "ai_detected": False, "digital_source_type": [], "c2pa_read_error": "other"}
                 for pid in photo_ids
             ],
-            "measurement_length": None,
-            "measurement_width": None,
+            "measurement_length": _measurement(measurement_length),
+            "measurement_width": _measurement(measurement_width),
             "item_attributes": item_attributes,
             "manufacturer": None,
             "manufacturer_labelling": None,
@@ -769,19 +771,8 @@ class Vinted:
             r.data.setdefault("photo_ids", photo_ids)
         return r
 
-    def edit_item(self, ref: str | int, **changes: Any) -> Response:
-        """Change only the given fields of one of your listings.
-
-        Accepted keys: ``title``, ``description``, ``price``, ``catalog_id``,
-        ``condition``, ``brand_id``/``brand``, ``size_id``, ``color_ids``,
-        ``package_size_id``, ``attributes`` (merged by code), ``isbn``,
-        ``photo_paths`` (replaces the photos).
-        """
-        self._require_login()
-        unknown = set(changes) - _EDITABLE
-        if unknown:
-            raise ValueError(f"unknown fields: {', '.join(sorted(unknown))}")
-        iid = _item_id(ref)
+    def _prepare_item_upload(self, iid: int, changes: dict[str, Any]) -> tuple[dict, str, Optional[Response]]:
+        changes = dict(changes)
         cur = self.item_draft(iid).raise_for_error().data.get("item") or {}
         temp_uuid = str(uuid.uuid4())
         photo_ids = [int(p["id"]) for p in cur.get("photos") or [] if p.get("id")]
@@ -790,10 +781,27 @@ class Vinted:
             for p in changes.pop("photo_paths"):
                 r = self.upload_photo(p, temp_uuid)
                 if not r.ok:
-                    return r
+                    return {}, temp_uuid, r
                 photo_ids.append(int(r.data["id"]))
         changes.pop("photo_paths", None)
-        item = self._merged_item(iid, cur, changes, temp_uuid, photo_ids)
+        return self._merged_item(iid, cur, changes, temp_uuid, photo_ids), temp_uuid, None
+
+    def edit_item(self, ref: str | int, **changes: Any) -> Response:
+        """Change only the given fields of one of your listings.
+
+        Accepted keys: ``title``, ``description``, ``price``, ``catalog_id``,
+        ``condition``, ``brand_id``/``brand``, ``size_id``, ``color_ids``,
+        ``package_size_id``, ``attributes`` (merged by code), ``isbn``,
+        ``measurement_width``, ``measurement_length``, ``photo_paths`` (replaces the photos).
+        """
+        self._require_login()
+        unknown = set(changes) - _EDITABLE
+        if unknown:
+            raise ValueError(f"unknown fields: {', '.join(sorted(unknown))}")
+        iid = _item_id(ref)
+        item, temp_uuid, fail = self._prepare_item_upload(iid, changes)
+        if fail:
+            return fail
         return self.send("PUT", "core", f"/item_upload/items/{iid}",
                          {"item": item, "push_up": False, "parcel": None, "upload_session_id": temp_uuid},
                          headers={"X-Upload-Form": "true"})
@@ -826,6 +834,8 @@ class Vinted:
             isbn=changes.pop("isbn", cur.get("isbn")),
             currency=cur.get("currency") or "EUR",
             item_id=iid,
+            measurement_width=changes.pop("measurement_width", cur.get("measurement_width")),
+            measurement_length=changes.pop("measurement_length", cur.get("measurement_length")),
         )
 
     def delete_item(self, ref: str | int) -> Response:
@@ -868,6 +878,19 @@ class Vinted:
                                   [int(p["id"]) for p in cur.get("photos") or [] if p.get("id")])
         return self.send("POST", "core", f"/item_upload/drafts/{did}/completion",
                          {"draft": draft, "push_up": False, "parcel": None, "upload_session_id": temp_uuid})
+
+    def update_draft(self, draft_id: int, **changes: Any) -> Response:
+        """Update a saved draft (``PUT /item_upload/drafts/{id}``). Same fields as :meth:`edit_item`."""
+        self._require_login()
+        unknown = set(changes) - _EDITABLE
+        if unknown:
+            raise ValueError(f"unknown fields: {', '.join(sorted(unknown))}")
+        did = int(draft_id)
+        draft, temp_uuid, fail = self._prepare_item_upload(did, changes)
+        if fail:
+            return fail
+        return self.send("PUT", "core", f"/item_upload/drafts/{did}",
+                         {"draft": draft, "parcel": None, "upload_session_id": temp_uuid})
 
     def delete_draft(self, draft_id: int) -> Response:
         self._require_login()
@@ -1024,7 +1047,7 @@ _LIKE_NOTIFICATION = 20
 
 _EDITABLE = frozenset({
     "title", "description", "price", "catalog_id", "condition", "brand_id", "brand", "size_id", "color_ids",
-    "package_size_id", "attributes", "isbn", "photo_paths",
+    "package_size_id", "attributes", "isbn", "photo_paths", "measurement_width", "measurement_length",
 })
 
 
@@ -1052,6 +1075,15 @@ def condition_id(c: str | int) -> int:
     if s in _cfg.CONDITIONS:
         return _cfg.CONDITIONS[s]
     raise ValueError(f"unknown condition {c!r}; use one of {', '.join(_cfg.CONDITIONS)}")
+
+
+def _measurement(value: Optional[float | str]) -> Optional[str]:
+    if value is None or value == "":
+        return None
+    v = float(value)
+    if v <= 0:
+        raise ValueError("measurements must be positive")
+    return str(int(v)) if v == int(v) else f"{v:g}"
 
 
 def _amount(price: float | str) -> str:

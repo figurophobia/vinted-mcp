@@ -147,6 +147,7 @@ Message `data.entity_type`: `message`, `offer_request_message` (buyer offer: `of
 | ✅ | `PUT /item_upload/items/{id}` (same body, `item.id` set, photos = item photo ids, or new `/photos` ids to replace them) | edit |
 | ✅ | `PUT /items/{id}/is_hidden {is_hidden}` | hide/show (400 while under review) |
 | ✅ | `POST /items/{id}/delete` | delete (403 `access_denied` while under review) |
+| ✅ | `PUT /item_upload/drafts/{id}` `{draft, parcel, upload_session_id}` | edit a saved draft (CLI `update-draft`) |
 | ✅ | `POST /item_upload/drafts/{id}/completion {draft, push_up:false, parcel:null, upload_session_id}` | publish a draft (draft = same shape as `item`, `id` set) |
 | ✅ | `POST /item_upload/suggestions/categories {image_metadata:[{image_id:<photo.high_resolution.id>, orientation:"0"}], upload_session_id}` | categories guessed from photos → `{categories, prefill_categories}` |
 | ✅ | `POST /item_upload/suggestions/attributes {title, description, category_id, suggested_category_id, image_metadata, upload_session_id, attributes}` | brand/colour/model suggestions |

@@ -281,6 +281,7 @@ def cmd_publish(args: argparse.Namespace) -> None:
         price=args.price, catalog_id=args.catalog, condition=args.condition, brand_id=args.brand_id,
         brand=args.brand, size_id=args.size, color_ids=_ints(args.colors), package_size_id=args.package_size,
         attributes=_attrs(args.attr),
+        measurement_width=args.measurement_width, measurement_length=args.measurement_length,
     ))
 
 
@@ -352,6 +353,19 @@ def cmd_bundle(args: argparse.Namespace) -> None:
 def cmd_publish_draft(args: argparse.Namespace) -> None:
     changes = {k: getattr(args, k) for k in ("price", "title") if getattr(args, k) is not None}
     _out(args, _client(args).publish_draft(args.draft_id, **changes))
+
+
+def cmd_update_draft(args: argparse.Namespace) -> None:
+    changes = {
+        k: getattr(args, k)
+        for k in ("title", "price", "measurement_width", "measurement_length")
+        if getattr(args, k) is not None
+    }
+    if args.description is not None:
+        changes["description"] = open(args.description[1:], encoding="utf-8").read() if args.description.startswith("@") else args.description
+    if not changes:
+        raise SystemExit("error: nothing to change")
+    _out(args, _client(args).update_draft(args.draft_id, **changes))
 
 
 def cmd_suggest_listing(args: argparse.Namespace) -> None:
@@ -531,6 +545,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--colors")
     p.add_argument("--package-size", type=int)
     p.add_argument("--attr", action="append", help="code=id,id (see listing-options)")
+    p.add_argument("--measurement-width", type=float, help="flat width in cm (upload form)")
+    p.add_argument("--measurement-length", type=float, help="length in cm")
     p.add_argument("--draft", action="store_true")
 
     p = add("edit", cmd_edit, "edit fields of a listing")
@@ -569,6 +585,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("draft_id", type=int)
     p.add_argument("--price", type=float)
     p.add_argument("--title")
+
+    p = add("update-draft", cmd_update_draft, "update a saved draft without publishing")
+    p.add_argument("draft_id", type=int)
+    p.add_argument("--title")
+    p.add_argument("--description", help="text or @file")
+    p.add_argument("--price", type=float)
+    p.add_argument("--measurement-width", type=float, dest="measurement_width")
+    p.add_argument("--measurement-length", type=float, dest="measurement_length")
 
     p = add("suggest-listing", cmd_suggest_listing, "upload photos and propose category, attributes and price")
     p.add_argument("photos", nargs="+")
