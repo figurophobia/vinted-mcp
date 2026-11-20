@@ -6,7 +6,7 @@ import json
 import os
 from typing import Any
 
-VERSION = "0.1.0"
+VERSION = "0.2.0.dev0"
 
 
 #: Country domain (``es``, ``fr``, ``it``, ``de``, ``pt``...). Selects the
@@ -46,6 +46,18 @@ LOCALES = {"es": "es-ES", "fr": "fr-FR", "it": "it-IT", "de": "de-DE", "pt": "pt
 
 def locale(domain: str | None = None) -> str:
     return LOCALES.get(domain or DOMAIN, "en-GB")
+
+
+#: Currency a member of each country site pays and offers in. Offers, offer
+#: limits and price filters must use it: a Hungarian member offering on a
+#: Romanian listing sends HUF (Vinted converts), never EUR.
+CURRENCIES = {"pl": "PLN", "cz": "CZK", "hu": "HUF", "ro": "RON", "se": "SEK", "dk": "DKK",
+              "co.uk": "GBP", "com": "USD"}
+
+
+def currency(domain: str | None = None) -> str:
+    """The member currency of a country site (``EUR`` for the euro countries)."""
+    return CURRENCIES.get(domain or DOMAIN, "EUR")
 
 
 CONFIG_DIR = os.environ.get("VINTED_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".config", "vinted-mcp")

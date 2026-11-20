@@ -120,7 +120,7 @@ def listing_from_photos(
             rng = r.data.get("price_range") or {}
             s = v.send("POST", "edge", "/upload-form-suggestions/item_upload/items/similar_sold_items", {
                 **body, "price_from": rng.get("price_from"), "price_to": rng.get("price_to"),
-                "currency_code": rng.get("currency_code") or "EUR", "upload_session_id": session_id,
+                "currency_code": rng.get("currency_code") or v.currency, "upload_session_id": session_id,
             })
             if s.ok:
                 price["similar_sold"] = [

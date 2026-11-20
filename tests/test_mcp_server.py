@@ -23,8 +23,8 @@ def test_writes_registered_with_flag() -> None:
     assert _names(True) == {f.__name__ for f in m._READ_TOOLS + m._WRITE_TOOLS}
 
 
-def test_no_checkout_tools() -> None:
-    # Reading purchases (list_purchases) is fine; nothing may buy, check out or pay.
+def test_no_checkout_tools_without_flag() -> None:
+    # Reading purchases (list_purchases) is fine; without --allow-checkout nothing may buy, check out or pay.
     words = {w for n in _names(True) for w in n.split("_")}
     assert not words & {"buy", "checkout", "pay", "payment", "purchase", "bump"}
 

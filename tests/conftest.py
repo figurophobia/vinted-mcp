@@ -30,7 +30,7 @@ class FakeTransport:
     def request(self, method: str, url: str, *, params=None, json_body=None, multipart=None, headers=None,
                 retry_auth: bool = True) -> Response:
         self.calls.append({"method": method, "url": url, "params": params, "json": json_body,
-                           "multipart": multipart, "headers": headers})
+                           "multipart": multipart, "headers": headers, "retry_auth": retry_auth})
         for (m, suffix), resp in self.routes.items():
             if m == method and url.endswith(suffix):
                 return resp(self.calls[-1]) if callable(resp) else resp

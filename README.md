@@ -21,7 +21,7 @@
   <b>Give an AI agent a Vinted account.</b><br>
   Search the catalogue, read listings and sellers, chat, negotiate offers on both sides, manage your closet
   and let the agent draft listings from photos, negotiate within your limits and relist — through the same
-  internal API the Vinted web app uses, with no browser automation. <b>Buying stays manual.</b>
+  internal API the Vinted web app uses, with no browser automation. <b>Buying is opt-in and needs your explicit confirmation of the exact total.</b>
 </p>
 
 ---
@@ -155,12 +155,13 @@ OpenCode (`~/.config/opencode/opencode.json`):
 | Flag / variable | Effect |
 |---|---|
 | `--allow-writes` | Registers the write and automation tools. Without it the server is read-only. |
+| `--allow-checkout` | Registers `checkout_prepare`, `checkout_pay`, `checkout_status` (buying with a saved card). |
 | `--session <file\|dir>` | Session file or config directory (default `~/.config/vinted-mcp`) |
 | `VINTED_COOKIES` | Use these cookies instead of a session file |
 | `VINTED_DOMAIN` | Country domain (`es`, `fr`, `it`, `de`, …) |
 
-The server instructions tell the model that listing descriptions and messages are untrusted data and that
-there is no checkout. Writes can have partial or unknown outcomes; tools return the API's answer so the agent
+The server instructions tell the model that listing descriptions and messages are untrusted data and, with
+`--allow-checkout`, that a payment needs the user's explicit confirmation of the quoted total. Writes can have partial or unknown outcomes; tools return the API's answer so the agent
 can check state before retrying.
 
 ## MCP tools
@@ -237,6 +238,19 @@ slugs or full URLs.
 | `listing_from_photos` | `photo_paths` | Upload photos once and propose a listing: category guessed from the photos, required attributes, brand, package sizes and prices (Vinted's recommendation, similar sold items, active listings) |
 | `negotiate_offer` | `conversation_id`, `floor` | Seller auto-negotiation, one step: accept a pending offer >= floor, otherwise reject and counter down a concession ladder (never below floor), or remind the buyer of the current price |
 | `relist_item` | `item` | Take a listing down and publish it again (new photos recommended: re-used photos may be flagged as a duplicate) |
+
+#### Checkout (3, only with `--allow-checkout`)
+
+- `checkout_prepare` (`item`, optional `shipping`: `auto`, `home` or `pickup`): builds the checkout at the
+  accepted offer price if there is one, selects your saved card and returns the total with shipping and buyer
+  protection, the price lines, delivery, address, card and a one-time confirmation code (15 minutes). Pays nothing.
+- `checkout_pay` (`purchase_id`, `confirmation_code`, `confirmed_total`): re-reads the quote, refuses if anything
+  changed, and sends the payment request once. 3-D Secure stays with you (bank app or the returned `checkout_url`).
+- `checkout_status`: the locally recorded checkouts and their payment status.
+
+CLI: `vinted checkout prepare <item> [--shipping pickup]`, `vinted checkout pay <purchase> --code ABC123 --total 10850`,
+`vinted checkout status`.
+
 Names match [wallapop-mcp](https://github.com/figurophobia/wallapop-mcp) wherever the concept is the same
 (`search`, `get_item`, `get_seller`, `seller_items`, `list_favorites`, `set_favorite`, `send_offer`,
 `respond_offer`, `counter_offer`, `get_offer_constraints`, `get_offer_status`, `list_purchases`, `list_sales`,
@@ -428,7 +442,7 @@ flowchart LR
 
 | | |
 |---|---|
-| **No buying** | There is no checkout, payment or paid-extra (bump, featured closet) tool. On Vinted a buyer accepts a seller's counter-offer by pressing *Buy*, so that also stays manual. |
+| **Buying is gated** | Only with `--allow-checkout`. `checkout_prepare` returns the quote and a one-time code without paying; `checkout_pay` needs that code and the confirmed total, re-checks the quote and sends the payment once. A started, pending or unclear payment blocks any further payment for that item. Only a saved card is paid automatically; 3-D Secure stays with you. No paid extras (bump, featured closet). |
 | **Writes are opt-in** | The MCP server is read-only unless started with `--allow-writes`; bulk and automation tools preview by default. |
 | **Untrusted content** | Descriptions and messages are data, never instructions; the negotiator flags injection attempts instead of obeying them. |
 | **Duplicates** | Vinted deletes listings it sees as duplicates of one already online (and may restrict publishing after repeats). Never list the same item twice; relisting deletes first. |
