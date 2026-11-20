@@ -219,8 +219,9 @@ def parse_quote(raw: Any, *, domain: str, transaction_id: Optional[int] = None) 
     """Summarise a checkout build/update answer for a human and for :func:`pay`'s checks."""
     raw = raw if isinstance(raw, dict) else {}
     comp = _get(raw, "checkout", "components") or {}
-    pid = (_get(raw, "purchase", "id") or _get(raw, "checkout", "purchase_id") or raw.get("purchase_id")
-           or _find_key(raw, "purchase_id"))
+    # The live web checkout answers {"checkout": {"id": "<opaque purchase id>", ...}}.
+    pid = (_get(raw, "purchase", "id") or _get(raw, "checkout", "purchase_id") or _get(raw, "checkout", "id")
+           or raw.get("purchase_id") or _find_key(raw, "purchase_id"))
     checksum = raw.get("checksum") or _get(raw, "checkout", "checksum") or _find_key(raw, "checksum")
     pay_button = comp.get("pay_button_v2") or {}
     total = money(_get(pay_button, "total", "price"))
@@ -293,8 +294,11 @@ def parse_quote(raw: Any, *, domain: str, transaction_id: Optional[int] = None) 
                + (f"&order_id={int(transaction_id)}&order_type=transaction" if transaction_id else ""))
 
     conversion = summary.get("currency_conversion") if isinstance(summary, dict) else None
+    shipping_order_id = (_get(comp, "shipping_pickup_details", "shipping_order_id")
+                         or _get(comp, "shipping_address", "shipping_order_id"))
     return {
         "purchase_id": str(pid) if pid else None,
+        "shipping_order_id": shipping_order_id,
         "checksum": checksum,
         "total": total,
         "lines": _price_lines(summary),
@@ -381,12 +385,67 @@ def _check(r: Response, step: str) -> dict:
 # --- public API -------------------------------------------------------------
 
 
+def _nearby(v: Any, shipping_order_id: Any, latitude: float, longitude: float, country_code: str) -> list[dict]:
+    """Pickup points around a location for one shipping order, as the web checkout's point picker lists them."""
+    r = v.get("edge", f"/shipping-estimation/external/shipping_orders/{int(shipping_order_id)}/nearby_pickup_points",
+              {"country_code": country_code, "latitude": str(latitude), "longitude": str(longitude)})
+    data = _check(r, "pickup points")
+    rates = {x.get("carrier_code"): x for x in data.get("shipping_rates") or [] if isinstance(x, dict)}
+    out = []
+    for entry in data.get("shipping_points") or []:
+        pt = entry.get("point") if isinstance(entry, dict) else None
+        if not isinstance(pt, dict) or pt.get("active") is False:
+            continue
+        rate = rates.get(pt.get("carrier_code")) or {}
+        out.append({
+            "code": str(pt.get("code")), "uuid": pt.get("uuid"), "name": pt.get("name"),
+            "address": ", ".join(str(x) for x in (pt.get("address_line1"), pt.get("postal_code"), pt.get("city")) if x),
+            "carrier": rate.get("title") or pt.get("carrier_code"), "carrier_code": pt.get("carrier_code"),
+            "rate_uuid": pt.get("rate_uuid") or rate.get("rate_uuid"), "price": money(rate.get("price")),
+            "distance_km": round(entry["distance"], 1) if isinstance(entry.get("distance"), (int, float)) else None,
+        })
+    return out
+
+
+def _open(v: Any, item: str | int) -> tuple[int, int, dict, dict]:
+    """Open the transaction for ``item`` and build its checkout: (item id, transaction id, details, raw build)."""
+    iid = _item_id(item)
+    details = v.item(iid)
+    if details.get("can_buy") is False or details.get("is_reserved") or details.get("is_hidden"):
+        raise CheckoutError(f"item {iid} cannot be bought right now (sold, reserved or hidden)")
+    conv = v.start_conversation(iid, seller_id=details.get("seller_id"))
+    tid = conv.data.get("transaction_id") if conv.ok and isinstance(conv.data, dict) else None
+    if not tid:
+        raise CheckoutError(f"could not open the transaction for item {iid}: {conv.error_reason or 'no transaction id'}")
+    return iid, int(tid), details, _check(_build(v, iid, int(tid)), "checkout build")
+
+
+def pickup_points(v: Any, item: str | int, latitude: float, longitude: float, *, country_code: str = "") -> list[dict]:
+    """Pickup points Vinted offers for buying ``item``, nearest first. Builds the checkout but never pays."""
+    v._require_login()
+    iid, tid, _, raw = _open(v, item)
+    soid = parse_quote(raw, domain=v.domain, transaction_id=tid)["shipping_order_id"]
+    if not soid:
+        raise CheckoutError("the checkout has no shipping order, so no pickup points (nothing was paid)")
+    return _nearby(v, soid, latitude, longitude, country_code or v.domain.upper())
+
+
 def prepare(v: Any, item: str | int, *, shipping: str = "auto", payment: str = "card",
+            pickup_point: Optional[str] = None, latitude: Optional[float] = None, longitude: Optional[float] = None,
             ledger_path: Optional[str] = None) -> dict:
-    """Build the checkout for ``item`` and return the quote plus a one-time confirmation code. Never pays."""
+    """Build the checkout for ``item`` and return the quote plus a one-time confirmation code. Never pays.
+
+    ``pickup_point`` (a code from :func:`pickup_points`, found near ``latitude``/``longitude``) delivers to that point.
+    """
     v._require_login()
     if shipping not in ("auto", "home", "pickup"):
         raise ValueError("shipping must be auto, home or pickup")
+    if pickup_point is not None:
+        if shipping == "home":
+            raise ValueError("pickup_point needs pickup delivery, not home")
+        if latitude is None or longitude is None:
+            raise ValueError("pickup_point needs the latitude and longitude it was found near")
+        shipping = "pickup"
     iid = _item_id(item)
     details = v.item(iid)
     if details.get("can_buy") is False or details.get("is_reserved") or details.get("is_hidden"):
@@ -409,8 +468,19 @@ def prepare(v: Any, item: str | int, *, shipping: str = "auto", payment: str = "
     if not pid:
         raise CheckoutError("checkout build returned no purchase id (nothing was paid)")
 
+    point_ref = quote["point_ref"] if shipping == "pickup" else None
+    if pickup_point is not None:
+        if not quote["shipping_order_id"]:
+            raise CheckoutError("the checkout has no shipping order, so no pickup point can be chosen (nothing was paid)")
+        points = _nearby(v, quote["shipping_order_id"], latitude, longitude, v.domain.upper())
+        wanted = next((p for p in points if p["code"] == str(pickup_point)), None)
+        if not wanted or not (wanted["uuid"] and wanted["rate_uuid"]):
+            raise CheckoutError(f"pickup point {pickup_point} is not offered for this item near that location "
+                                f"(offered: {', '.join(p['code'] for p in points) or 'none'}); nothing was paid")
+        point_ref = {"rate_uuid": wanted["rate_uuid"], "point_code": wanted["code"], "point_uuid": wanted["uuid"]}
+
     choice = _payment_choice(quote, payment)
-    comp = _components(shipping, choice, quote["point_ref"] if shipping == "pickup" else None)
+    comp = _components(shipping, choice, point_ref)
     quote = parse_quote(_check(_update(v, pid, tid, comp), "checkout update"), domain=v.domain, transaction_id=tid)
     # Switching to pickup can reveal Vinted's saved point, and a first update can
     # reveal the saved card: select exactly what this checkout offers, once more.

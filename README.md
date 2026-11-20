@@ -155,7 +155,7 @@ OpenCode (`~/.config/opencode/opencode.json`):
 | Flag / variable | Effect |
 |---|---|
 | `--allow-writes` | Registers the write and automation tools. Without it the server is read-only. |
-| `--allow-checkout` | Registers `checkout_prepare`, `checkout_pay`, `checkout_status` (buying with a saved card). |
+| `--allow-checkout` | Registers `pickup_points`, `checkout_prepare`, `checkout_pay`, `checkout_status` (buying with a saved card). |
 | `--session <file\|dir>` | Session file or config directory (default `~/.config/vinted-mcp`) |
 | `VINTED_COOKIES` | Use these cookies instead of a session file |
 | `VINTED_DOMAIN` | Country domain (`es`, `fr`, `it`, `de`, …) |
@@ -239,9 +239,12 @@ slugs or full URLs.
 | `negotiate_offer` | `conversation_id`, `floor` | Seller auto-negotiation, one step: accept a pending offer >= floor, otherwise reject and counter down a concession ladder (never below floor), or remind the buyer of the current price |
 | `relist_item` | `item` | Take a listing down and publish it again (new photos recommended: re-used photos may be flagged as a duplicate) |
 
-#### Checkout (3, only with `--allow-checkout`)
+#### Checkout (4, only with `--allow-checkout`)
 
-- `checkout_prepare` (`item`, optional `shipping`: `auto`, `home` or `pickup`): builds the checkout at the
+- `pickup_points` (`item`, `latitude`, `longitude`): the lockers and parcel shops Vinted offers for this item near
+  that location, nearest first, with carrier, price and the point `code`. Pays nothing.
+- `checkout_prepare` (`item`, optional `shipping`: `auto`, `home` or `pickup`; optional `pickup_point` with the same
+  `latitude` and `longitude`, to deliver to that point): builds the checkout at the
   accepted offer price if there is one, selects your saved card and returns the total with shipping and buyer
   protection, the price lines, delivery, address, card and a one-time confirmation code (15 minutes). Pays nothing.
 - `checkout_pay` (`purchase_id`, `confirmation_code`, `confirmed_total`): re-reads the quote, refuses if anything

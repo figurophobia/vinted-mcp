@@ -108,6 +108,84 @@ def test_prepare_selects_the_saved_card_and_never_pays(hu, ledger) -> None:
     assert rec["status"] == "prepared" and rec["code_hash"] != out["confirmation_code"]
 
 
+def test_prepare_reads_the_purchase_id_from_checkout_id(hu, ledger) -> None:
+    """The live build answer has no "purchase" key: the purchase id is checkout.id."""
+    v, fake = hu
+    live = quote(card=False)
+    del live["purchase"]
+    live["checkout"]["id"] = PID
+    live["checkout"]["checksum"] = live.pop("checksum")
+    fake.routes[("POST", "/purchases/checkout/build")] = ok(live)
+    out = checkout.prepare(v, ITEM, ledger_path=ledger)
+    assert out["purchase_id"] == PID and out["ready_to_pay"]
+    assert _calls(fake, "PUT", f"/purchases/{PID}/checkout")
+
+
+SOID = 555
+NEARBY = {
+    "shipping_rates": [{"rate_uuid": "rate-synth", "carrier_code": "SYNTH-LOCKER", "title": "Synth Parcel",
+                        "price": {"amount": 1694.0, "currency_code": "HUF"}}],
+    "shipping_points": [{"distance": 1.2, "point": {"code": "point-1", "uuid": "pt-uuid", "name": "Synth Locker",
+                                                    "address_line1": "1 Synth Street", "postal_code": "0000",
+                                                    "city": "Synthtown", "carrier_code": "SYNTH-LOCKER", "active": True}}],
+}
+
+
+def _with_point(q: dict, selected: bool) -> dict:
+    det = q["checkout"]["components"]["shipping_pickup_details"]
+    det["shipping_order_id"] = SOID
+    q["checkout"]["components"]["shipping_pickup_options"]["selected_pickup_option"] = 2
+    if selected:
+        det["pickup_details"] = {"selected_rate_uuid": "rate-synth",
+                                 "shipping_point": {"code": "point-1", "uuid": "pt-uuid", "rate_uuid": "rate-synth",
+                                                    "name": "Synth Locker", "city": "Synthtown"}}
+    else:
+        det["pickup_details"] = {"selected_rate_uuid": "rate-other"}
+    return q
+
+
+def test_prepare_selects_the_requested_pickup_point(hu, ledger) -> None:
+    v, fake = hu
+    fake.routes[("POST", "/purchases/checkout/build")] = ok(_with_point(quote(card=False), selected=False))
+    fake.routes[("GET", f"/shipping_orders/{SOID}/nearby_pickup_points")] = ok(NEARBY)
+    fake.routes[("PUT", f"/purchases/{PID}/checkout")] = ok(_with_point(quote(), selected=True))
+    out = checkout.prepare(v, ITEM, pickup_point="point-1", latitude=0.5, longitude=0.5, ledger_path=ledger)
+    assert out["ready_to_pay"] and out["delivery"]["point"]["code"] == "point-1"
+    comp = _calls(fake, "PUT", f"/purchases/{PID}/checkout")[0]["json"]["components"]
+    assert comp["shipping_pickup_details"] == {"rate_uuid": "rate-synth", "point_code": "point-1", "point_uuid": "pt-uuid"}
+    assert comp["shipping_pickup_options"] == {"pickup_type": 2}
+    near = _calls(fake, "GET", f"/shipping_orders/{SOID}/nearby_pickup_points")[0]
+    assert near["url"].startswith(v.edge) and near["params"]["country_code"] == "HU"
+
+
+def test_prepare_refuses_a_pickup_point_that_is_not_offered(hu, ledger) -> None:
+    v, fake = hu
+    fake.routes[("POST", "/purchases/checkout/build")] = ok(_with_point(quote(card=False), selected=False))
+    fake.routes[("GET", f"/shipping_orders/{SOID}/nearby_pickup_points")] = ok(NEARBY)
+    with pytest.raises(checkout.CheckoutError, match="not offered"):
+        checkout.prepare(v, ITEM, pickup_point="999", latitude=0.5, longitude=0.5, ledger_path=ledger)
+    assert not _calls(fake, "PUT", f"/purchases/{PID}/checkout")
+
+
+def test_pickup_points_lists_offered_points(hu) -> None:
+    v, fake = hu
+    fake.routes[("POST", "/purchases/checkout/build")] = ok(_with_point(quote(card=False), selected=False))
+    fake.routes[("GET", f"/shipping_orders/{SOID}/nearby_pickup_points")] = ok(NEARBY)
+    pts = checkout.pickup_points(v, ITEM, 0.5, 0.5)
+    assert pts == [{"code": "point-1", "uuid": "pt-uuid", "name": "Synth Locker", "address": "1 Synth Street, 0000, Synthtown",
+                    "carrier": "Synth Parcel", "carrier_code": "SYNTH-LOCKER", "rate_uuid": "rate-synth",
+                    "price": {"amount": "1694.00", "currency": "HUF"}, "distance_km": 1.2}]
+
+
+def test_mcp_prepare_reports_why_it_failed(hu, ledger, monkeypatch) -> None:
+    v, fake = hu
+    fake.routes[("POST", "/purchases/checkout/build")] = ok({"checkout": {"components": {}}})
+    monkeypatch.setattr(m, "_client", v)
+    monkeypatch.setattr(checkout, "LEDGER_PATH", ledger)
+    out = m.checkout_prepare(str(ITEM))
+    assert out["ok"] is False and out["paid"] is False and "no purchase id" in out["error"]
+
+
 def test_prepare_without_a_card_gives_no_code(hu, ledger) -> None:
     v, fake = hu
     no_card = quote(card=False)
