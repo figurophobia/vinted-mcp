@@ -52,7 +52,8 @@ Check offline with `vinted session` / `session_status`. Token refresh is automat
    attributes (e.g. `video_game_platform`, `condition`) and `package_sizes` (`8` = 5 kg, `9` = 10 kg, `10` = 20 kg
    for consoles); `find_brand("nintendo", catalog_id)` → `brand_id`.
 2. **Publish** — `publish_item(title, description, price, catalog_id, condition, photo_paths, brand_id, brand,
-   package_size_id, attributes={"video_game_platform": [1265]})` (`draft=True` for a draft).
+   package_size_id, size_id=…, attributes={"video_game_platform": [1265]})` (`draft=True` for a draft).
+   `size_id` is mirrored into the `size` item attribute (required for many clothing categories).
    New listings are briefly hidden while processed; check `my_items`.
 3. **Edit** — `edit_item(item, price=…, title=…)` changes only what you pass. Vinted re-reviews edits:
    `status.item_alert_type = "delayed_publication"` (hidden, not editable/hideable) for a while.

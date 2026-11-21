@@ -697,7 +697,10 @@ class Vinted:
         item_id: Optional[int] = None,
     ) -> dict:
         """The ``item`` object the upload form posts."""
-        item_attributes = [{"code": k, "ids": [int(i) for i in v]} for k, v in (attributes or {}).items() if k != "condition"]
+        attrs = dict(attributes or {})
+        if size_id is not None:
+            attrs.setdefault("size", [int(size_id)])
+        item_attributes = [{"code": k, "ids": [int(i) for i in v]} for k, v in attrs.items() if k != "condition"]
         item_attributes.append({"code": "condition", "ids": [condition_id(condition)]})
         item: dict[str, Any] = {
             "id": item_id,
@@ -819,7 +822,7 @@ class Vinted:
             temp_uuid=temp_uuid,
             brand_id=changes.pop("brand_id", cur.get("brand_id")),
             brand=changes.pop("brand", (cur.get("brand_dto") or {}).get("title") or cur.get("brand_title")),
-            size_id=changes.pop("size_id", cur.get("size_id")),
+            size_id=changes.pop("size_id", cur.get("size_id") or _first_attr_id(attrs, "size")),
             color_ids=changes.pop("color_ids", [c for c in (cur.get("color1_id"), cur.get("color2_id")) if c] or cur.get("color_ids")),
             package_size_id=changes.pop("package_size_id", cur.get("package_size_id")),
             attributes=attrs,
@@ -1059,3 +1062,8 @@ def _amount(price: float | str) -> str:
     if v <= 0:
         raise ValueError("price must be positive")
     return f"{v:.2f}".rstrip("0").rstrip(".")
+
+
+def _first_attr_id(attrs: dict[str, list], code: str) -> Optional[int]:
+    ids = attrs.get(code) or []
+    return int(ids[0]) if ids else None
