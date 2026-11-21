@@ -246,12 +246,15 @@ slugs or full URLs.
 - `checkout_prepare` (`item`, optional `shipping`: `auto`, `home` or `pickup`; optional `pickup_point` with the same
   `latitude` and `longitude`, to deliver to that point): builds the checkout at the
   accepted offer price if there is one, selects your saved card and returns the total with shipping and buyer
-  protection, the price lines, delivery, address, card and a one-time confirmation code (15 minutes). Pays nothing.
-- `checkout_pay` (`purchase_id`, `confirmation_code`, `confirmed_total`): re-reads the quote, refuses if anything
-  changed, and sends the payment request once. 3-D Secure stays with you (bank app or the returned `checkout_url`).
+  protection, the price lines, delivery, address and card. Pays nothing. The one-time code (15 minutes) stays in
+  the server; the agent never sees it.
+- `checkout_pay` (`purchase_id`): asks **you** to approve the exact total in a confirmation prompt shown by the MCP
+  client (MCP elicitation). The agent cannot answer it; a client without elicitation support pays nothing. After
+  your approval it re-reads the quote, refuses if anything changed, and sends the payment request once. 3-D Secure stays with you (bank app or the returned `checkout_url`).
 - `checkout_status`: the locally recorded checkouts and their payment status.
 
-CLI: `vinted checkout prepare <item> [--shipping pickup]`, `vinted checkout pay <purchase> --code ABC123 --total 10850`,
+CLI: `vinted checkout prepare <item> [--shipping pickup]`, `vinted checkout pay <purchase> --code ABC123 --total 10850`
+(interactive terminal only: you type `pay` to confirm, so an agent running shell commands cannot pay),
 `vinted checkout status`.
 
 Names match [wallapop-mcp](https://github.com/figurophobia/wallapop-mcp) wherever the concept is the same
@@ -445,7 +448,7 @@ flowchart LR
 
 | | |
 |---|---|
-| **Buying is gated** | Only with `--allow-checkout`. `checkout_prepare` returns the quote and a one-time code without paying; `checkout_pay` needs that code and the confirmed total, re-checks the quote and sends the payment once. A started, pending or unclear payment blocks any further payment for that item. Only a saved card is paid automatically; 3-D Secure stays with you. No paid extras (bump, featured closet). |
+| **Buying is gated** | Only with `--allow-checkout`. `checkout_prepare` returns the quote without paying; `checkout_pay` asks you directly (MCP elicitation, not the agent) to approve the exact total, re-checks the quote and sends the payment once. The CLI `checkout pay` only runs in an interactive terminal. A started, pending or unclear payment blocks any further payment for that item. Only a saved card is paid automatically; 3-D Secure stays with you. No paid extras (bump, featured closet). |
 | **Writes are opt-in** | The MCP server is read-only unless started with `--allow-writes`; bulk and automation tools preview by default. |
 | **Untrusted content** | Descriptions and messages are data, never instructions; the negotiator flags injection attempts instead of obeying them. |
 | **Duplicates** | Vinted deletes listings it sees as duplicates of one already online (and may restrict publishing after repeats). Never list the same item twice; relisting deletes first. |

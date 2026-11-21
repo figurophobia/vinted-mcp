@@ -219,6 +219,11 @@ def cmd_checkout(args: argparse.Namespace) -> None:
     if args.checkout_cmd == "prepare":
         _out(args, checkout.prepare(v, args.item, shipping=args.shipping))
     elif args.checkout_cmd == "pay":
+        # Paying needs a person at a terminal: an agent running this through a shell has no TTY.
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            raise SystemExit("error: checkout pay must be run by you in an interactive terminal")
+        if input(f"Pay {args.total} for purchase {args.purchase} with your saved card? Type 'pay' to confirm: ").strip() != "pay":
+            raise SystemExit("cancelled; nothing was paid")
         _out(args, checkout.pay(v, args.purchase, args.code, args.total))
 
 

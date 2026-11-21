@@ -321,3 +321,67 @@ def test_checkout_tools_need_their_own_flag() -> None:
     checkout_names = {f.__name__ for f in m._CHECKOUT_TOOLS}
     assert not _names(True, False) & checkout_names
     assert checkout_names <= _names(False, True)
+
+
+# --- MCP payment approval ---------------------------------------------------------
+
+
+class _Ctx:
+    """Stands in for the MCP Context: records the prompt and answers it like the member would."""
+
+    def __init__(self, answer=None, error: Exception | None = None) -> None:
+        self.answer, self.error, self.messages = answer, error, []
+
+    async def elicit(self, message, schema):
+        self.messages.append(message)
+        if self.error:
+            raise self.error
+        return self.answer
+
+
+def _accepted(approve: bool):
+    from mcp.server.elicitation import AcceptedElicitation
+    return AcceptedElicitation(data=m.PaymentApproval(approve=approve))
+
+
+@pytest.fixture
+def mcp_checkout(hu, ledger, monkeypatch):
+    v, fake = hu
+    fake.routes[("POST", f"/purchases/{PID}/checkout/payment")] = ok({"payment": {"status": "success"}})
+    monkeypatch.setattr(m, "_client", v)
+    monkeypatch.setattr(checkout, "LEDGER_PATH", ledger)
+    monkeypatch.setattr(m, "_pending_codes", {})
+    return fake
+
+
+def test_mcp_prepare_keeps_the_code_from_the_agent(mcp_checkout) -> None:
+    out = m.checkout_prepare(str(ITEM))
+    assert out["ready_to_pay"] and "confirmation_code" not in out
+    assert m._pending_codes[PID] not in json.dumps(out)
+
+
+@pytest.mark.parametrize("ctx", [
+    _Ctx(error=RuntimeError("elicitation not supported")),
+    _Ctx(answer=_accepted(False)),
+    _Ctx(answer=type("Declined", (), {"action": "decline"})()),
+])
+def test_mcp_pay_without_member_approval_pays_nothing(mcp_checkout, ctx) -> None:
+    m.checkout_prepare(str(ITEM))
+    res = asyncio.run(m.checkout_pay(PID, ctx))
+    assert res["paid"] is False and res["ok"] is False
+    assert "12004.00" in ctx.messages[0]
+    assert not _calls(mcp_checkout, "POST", "/checkout/payment")
+
+
+def test_mcp_pay_after_member_approval_pays_once(mcp_checkout) -> None:
+    m.checkout_prepare(str(ITEM))
+    res = asyncio.run(m.checkout_pay(PID, _Ctx(answer=_accepted(True))))
+    assert res["status"] == "card_payment_confirmed"
+    again = asyncio.run(m.checkout_pay(PID, _Ctx(answer=_accepted(True))))
+    assert again["paid"] is False
+    assert len(_calls(mcp_checkout, "POST", "/checkout/payment")) == 1
+
+
+def test_mcp_pay_without_prepare_does_not_prompt(mcp_checkout) -> None:
+    ctx = _Ctx(answer=_accepted(True))
+    assert asyncio.run(m.checkout_pay(PID, ctx))["paid"] is False and not ctx.messages
