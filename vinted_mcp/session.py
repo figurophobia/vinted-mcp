@@ -343,7 +343,8 @@ def _jwt(token: Optional[str]) -> dict:
     import base64
 
     try:
-        return json.loads(base64.urlsafe_b64decode((token or "").split(".")[1] + "=="))
+        payload = json.loads(base64.urlsafe_b64decode((token or "").split(".")[1] + "=="))
+        return payload if isinstance(payload, dict) else {}
     except (IndexError, ValueError):
         return {}
 
@@ -403,27 +404,39 @@ def recover_session(client: Vinted, source: str, domain: str, profile: Optional[
 
 
 def session_info(path: Optional[str] = None) -> dict:
-    """Describe the stored session without any network call."""
-    import base64
+    """Describe local session claims without validating them over the network."""
     import time
 
-    session = _cfg.load_session(path)
+    env = os.environ.get("VINTED_COOKIES")
+    session = (
+        {"cookies": _keep(parse_cookie_text(env)), "domain": os.environ.get("VINTED_DOMAIN"), "source": "env"}
+        if env else _cfg.load_session(path)
+    )
     cookies = session.get("cookies") or {}
+    access = _jwt(cookies.get("access_token_web"))
+    refresh = _jwt(cookies.get("refresh_token_web"))
+    user_id = access.get("sub") or refresh.get("sub")
+    if user_id:
+        state = "signed_in"
+    elif access or refresh or cookies.get("anon_id"):
+        state = "anonymous"
+    elif any(cookies.get(name) for name in _cfg.AUTH_COOKIES):
+        state = "unknown"
+    else:
+        state = "missing"
     info = {
-        "logged_in": bool(cookies.get("refresh_token_web") or cookies.get("access_token_web")),
+        "logged_in": state == "signed_in",
+        "session_state": state,
         "domain": session.get("domain") or _cfg.DOMAIN,
         "source": session.get("source"),
         "has_refresh_token": bool(cookies.get("refresh_token_web")),
     }
-    for name in ("access_token_web", "refresh_token_web"):
-        tok = cookies.get(name) or ""
-        try:
-            payload = json.loads(base64.urlsafe_b64decode(tok.split(".")[1] + "=="))
-            info[name.replace("_web", "") + "_expires_in_s"] = int(payload.get("exp", 0) - time.time())
-            if name == "access_token_web" and payload.get("sub"):
-                info["user_id"] = payload["sub"]
-        except (IndexError, ValueError):
-            pass
+    if user_id:
+        info["user_id"] = user_id
+    for name, claims in (("access_token", access), ("refresh_token", refresh)):
+        exp = claims.get("exp")
+        if isinstance(exp, int):
+            info[f"{name}_expires_in_s"] = int(exp - time.time())
     return info
 
 

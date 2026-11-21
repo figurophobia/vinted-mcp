@@ -448,8 +448,11 @@ flowchart LR
 
 ## Troubleshooting
 
+`session_status` reports whether the local session is `missing`, `anonymous`, `signed_in`, or `unknown` (opaque tokens). It reads local claims only; it does not check whether Vinted will accept the session.
+
 | Symptom | Cause and fix |
 |---|---|
+| MCP search: `Vinted returned HTTP 403: Access denied` | Vinted refused the catalogue request. The reason may not be known. Stop MCP requests rather than retrying. |
 | `blocked by anti-bot protection (403 HTML)` | DataDome/Cloudflare challenged the request. Open Vinted in a browser, then `vinted login` again (fresh anti-bot cookies). |
 | `401` / `invalid_authentication_token` | The session was revoked or expired. `vinted login --wizard`. |
 | `that browser holds an anonymous … session` | You are logged out in that browser; log in there or use `--wizard`. |
