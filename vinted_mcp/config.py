@@ -6,7 +6,7 @@ import json
 import os
 from typing import Any
 
-VERSION = "0.2.0.dev0"
+VERSION = "0.2.0"
 
 
 #: Country domain (``es``, ``fr``, ``it``, ``de``, ``pt``...). Selects the
