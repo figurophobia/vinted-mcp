@@ -90,6 +90,66 @@ def test_publish_size_id_in_item_attributes(client: Vinted, fake: FakeTransport,
         assert {"code": "size", "ids": [209]} in upload["item_attributes"]
 
 
+def test_publish_measurements_in_upload_body(client: Vinted, fake: FakeTransport, tmp_path) -> None:
+    f = tmp_path / "p.jpg"
+    f.write_bytes(b"x")
+    fake.routes[("POST", "/api/v2/photos")] = ok({"id": 1, "code": 0})
+    fake.routes[("POST", "/api/v2/item_upload/items")] = ok({"item": {"id": 9}, "code": 0})
+    r = client.publish(
+        photo_paths=[str(f)],
+        title="polo",
+        description="d",
+        price=22,
+        catalog_id=5492,
+        condition="good",
+        measurement_width=43,
+        measurement_length=67,
+    )
+    assert r.ok
+    item = fake.calls[-1]["json"]["item"]
+    assert item["measurement_width"] == "43"
+    assert item["measurement_length"] == "67"
+
+
+def test_update_draft_puts_merged_body(client: Vinted, fake: FakeTransport) -> None:
+    fake.routes[("GET", "/api/v2/item_upload/items/77")] = ok(
+        {
+            "code": 0,
+            "item": {
+                "id": 77,
+                "title": "old",
+                "description": "desc",
+                "catalog_id": 5492,
+                "brand_id": 88,
+                "brand_dto": {"title": "Ralph Lauren"},
+                "price": {"amount": "22.0", "currency_code": "EUR"},
+                "package_size_id": 1,
+                "currency": "EUR",
+                "photos": [{"id": 11}],
+                "measurement_width": "40",
+                "measurement_length": "60",
+                "item_attributes": [{"code": "condition", "ids": [3]}],
+            },
+        }
+    )
+    fake.routes[("PUT", "/api/v2/item_upload/drafts/77")] = ok({"draft": {"id": 77}, "code": 0})
+    r = client.update_draft(77, measurement_width=43, title="new title")
+    assert r.ok
+    draft = fake.calls[-1]["json"]["draft"]
+    assert draft["id"] == 77
+    assert draft["title"] == "new title"
+    assert draft["measurement_width"] == "43"
+    assert draft["measurement_length"] == "60"
+    assert fake.calls[-1]["method"] == "PUT"
+    assert fake.calls[-1]["url"].endswith("/item_upload/drafts/77")
+
+
+def test_update_draft_rejects_unknown_fields(client: Vinted, fake: FakeTransport) -> None:
+    fake.routes[("GET", "/api/v2/item_upload/items/1")] = ok({"code": 0, "item": {"id": 1, "price": "2", "item_attributes": []}})
+    with pytest.raises(ValueError):
+        client.update_draft(1, colour="red", condition="good")
+
+
 def test_publish_draft_endpoint(client: Vinted, fake: FakeTransport, tmp_path) -> None:
     f = tmp_path / "p.jpg"
     f.write_bytes(b"x")
