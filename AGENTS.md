@@ -127,7 +127,7 @@ for device signals, return `checkout_url` for the user to finish.
 
 **Checkout (3, `--allow-checkout`):** `checkout_prepare`, `checkout_pay`, `checkout_status`.
 
-**Writes (26, `--allow-writes`):** `set_favorite`, `toggle_follow`, `send_message`, `send_offer`, `respond_offer`, `counter_offer`, `offer_to_liker`, `message_all_likers`, `mark_conversation_read`, `delete_message`, `delete_conversation`, `publish_item`, `publish_draft`, `edit_item`, `pause_item`, `reserve_item`, `delete_item`, `delete_draft`, `save_search`, `update_profile`, `block_user`, `set_holiday_mode`, `set_bundle_discounts`, `listing_from_photos`, `negotiate_offer`, `relist_item`.
+**Writes (27, `--allow-writes`):** `set_favorite`, `toggle_follow`, `send_message`, `send_offer`, `respond_offer`, `counter_offer`, `offer_to_liker`, `message_all_likers`, `mark_conversation_read`, `delete_message`, `delete_conversation`, `publish_item`, `publish_draft`, `update_draft`, `edit_item`, `pause_item`, `reserve_item`, `delete_item`, `delete_draft`, `save_search`, `update_profile`, `block_user`, `set_holiday_mode`, `set_bundle_discounts`, `listing_from_photos`, `negotiate_offer`, `relist_item`.
 
 Names match wallapop-mcp wherever the concept is the same.
 

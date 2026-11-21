@@ -219,6 +219,7 @@ slugs or full URLs.
 | `delete_conversation` | `conversation_id` | Delete a conversation from your inbox (only those with is_deletable; Vinted notices cannot be deleted) |
 | `publish_item` | `title`, `description`, `price`, `catalog_id`, `condition` | Publish a listing (or save a draft) |
 | `publish_draft` | `draft_id` | Publish one of your drafts, optionally changing price/title/description first |
+| `update_draft` | `draft_id` + fields | Change fields of a saved draft (incl. `measurement_width`/`measurement_length`) without publishing |
 | `edit_item` | `item` | Change only the supplied fields of one of your listings |
 | `pause_item` | `item` | Pause (hide from the catalogue) one of your listings, or bring it back with paused=false |
 | `reserve_item` | — | Reserve an item for a buyer (transaction_id of their conversation), or unreserve it (item, reserved=false) |

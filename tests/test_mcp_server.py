@@ -76,3 +76,17 @@ def test_search_reports_access_denied(fake, monkeypatch, body) -> None:
     assert "Don't retry" in str(error.value)
     assert "cookies" not in str(error.value)
     assert len(fake.calls) == 1
+
+
+def test_update_draft_tool_forwards_measurements(client, fake, monkeypatch) -> None:
+    fake.routes[("GET", "/api/v2/item_upload/items/77")] = Response(200, {"code": 0, "item": {
+        "id": 77, "title": "polo", "description": "d", "catalog_id": 5492, "price": "22", "currency": "EUR",
+        "photos": [{"id": 11}], "measurement_length": "60",
+        "item_attributes": [{"code": "size", "ids": [209]}, {"code": "condition", "ids": [3]}],
+    }})
+    fake.routes[("PUT", "/api/v2/item_upload/drafts/77")] = Response(200, {"draft": {"id": 77}, "code": 0})
+    monkeypatch.setattr(m, "_client", client)
+    assert m.update_draft(77, measurement_width=45, size_id=210)["ok"]
+    draft = fake.calls[-1]["json"]["draft"]
+    assert draft["measurement_width"] == "45" and draft["measurement_length"] == "60"
+    assert {"code": "size", "ids": [210]} in draft["item_attributes"]

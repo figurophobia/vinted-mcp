@@ -509,14 +509,17 @@ def publish_item(
     draft: bool = False,
     photo_ids: Optional[list[int]] = None,
     upload_session_id: Optional[str] = None,
+    measurement_width: Optional[float] = None,
+    measurement_length: Optional[float] = None,
 ) -> dict:
-    """Publish a listing (or save a draft). Use suggest_category/list_categories for a leaf catalog_id, then listing_options for its required attributes (e.g. {"video_game_platform": [1265]}) and package_size_id. Vinted deletes listings it considers duplicates of one already online, so never publish the same item twice."""
+    """Publish a listing (or save a draft). Use suggest_category/list_categories for a leaf catalog_id, then listing_options for its required attributes (e.g. {"video_game_platform": [1265]}) and package_size_id. Vinted deletes listings it considers duplicates of one already online, so never publish the same item twice. measurement_width/measurement_length are optional flat measurements in cm."""
     _require_session()
     with _lock:
         return _resp(_c().publish(
             photo_paths=photo_paths, photo_ids=photo_ids, upload_session_id=upload_session_id, draft=draft, title=title, description=description, price=price,
             catalog_id=catalog_id, condition=condition, brand_id=brand_id, brand=brand, size_id=size_id,
             color_ids=color_ids, package_size_id=package_size_id, attributes=attributes,
+            measurement_width=measurement_width, measurement_length=measurement_length,
         ))
 
 
@@ -534,6 +537,8 @@ def edit_item(
     package_size_id: Optional[int] = None,
     attributes: Optional[dict[str, list[int]]] = None,
     photo_paths: Optional[list[str]] = None,
+    measurement_width: Optional[float] = None,
+    measurement_length: Optional[float] = None,
 ) -> dict:
     """Change only the supplied fields of one of your listings. Vinted re-reviews edited listings (item_alert_type=delayed_publication) for a few minutes."""
     _require_session()
@@ -541,11 +546,43 @@ def edit_item(
         title=title, description=description, price=price, condition=condition, catalog_id=catalog_id,
         brand_id=brand_id, brand=brand, size_id=size_id, color_ids=color_ids, package_size_id=package_size_id,
         attributes=attributes, photo_paths=photo_paths,
+        measurement_width=measurement_width, measurement_length=measurement_length,
     ).items() if v is not None}
     if not changes:
         raise ValueError("nothing to change")
     with _lock:
         return _resp(_c().edit_item(item, **changes))
+
+
+def update_draft(
+    draft_id: int,
+    title: Optional[str] = None,
+    description: Optional[str] = None,
+    price: Optional[float] = None,
+    condition: Optional[Condition] = None,
+    catalog_id: Optional[int] = None,
+    brand_id: Optional[int] = None,
+    brand: Optional[str] = None,
+    size_id: Optional[int] = None,
+    color_ids: Optional[list[int]] = None,
+    package_size_id: Optional[int] = None,
+    attributes: Optional[dict[str, list[int]]] = None,
+    photo_paths: Optional[list[str]] = None,
+    measurement_width: Optional[float] = None,
+    measurement_length: Optional[float] = None,
+) -> dict:
+    """Change only the supplied fields of one of your saved drafts without publishing it (publish_draft publishes)."""
+    _require_session()
+    changes = {k: v for k, v in dict(
+        title=title, description=description, price=price, condition=condition, catalog_id=catalog_id,
+        brand_id=brand_id, brand=brand, size_id=size_id, color_ids=color_ids, package_size_id=package_size_id,
+        attributes=attributes, photo_paths=photo_paths,
+        measurement_width=measurement_width, measurement_length=measurement_length,
+    ).items() if v is not None}
+    if not changes:
+        raise ValueError("nothing to change")
+    with _lock:
+        return _resp(_c().update_draft(draft_id, **changes))
 
 
 def pause_item(item: str, paused: bool = True) -> dict:
@@ -766,7 +803,7 @@ _WRITE_TOOLS = [
     set_favorite, toggle_follow, send_message, send_offer, respond_offer, counter_offer, offer_to_liker,
     message_all_likers,
     mark_conversation_read, delete_message, delete_conversation,
-    publish_item, publish_draft, edit_item, pause_item, reserve_item, delete_item, delete_draft, save_search,
+    publish_item, publish_draft, update_draft, edit_item, pause_item, reserve_item, delete_item, delete_draft, save_search,
     update_profile, block_user, set_holiday_mode, set_bundle_discounts, listing_from_photos, negotiate_offer, relist_item,
 ]
 
