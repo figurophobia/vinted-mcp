@@ -144,6 +144,19 @@ def test_edit_item_keeps_size_from_item_attributes(client: Vinted, fake: FakeTra
     assert {"code": "size", "ids": [209]} in item["item_attributes"]
 
 
+def test_edit_item_size_id_replaces_size_attribute(client: Vinted, fake: FakeTransport) -> None:
+    fake.routes[("GET", "/api/v2/item_upload/items/55")] = ok({"code": 0, "item": {
+        "id": 55, "title": "polo", "description": "d", "catalog_id": 5492, "price": "22", "currency": "EUR",
+        "photos": [{"id": 11}], "size_id": 209,
+        "item_attributes": [{"code": "size", "ids": [209]}, {"code": "condition", "ids": [3]}],
+    }})
+    fake.routes[("PUT", "/api/v2/item_upload/items/55")] = ok({"item": {"id": 55}, "code": 0})
+    assert client.edit_item(55, size_id=210).ok
+    item = fake.calls[-1]["json"]["item"]
+    assert item["size_id"] == 210
+    assert {"code": "size", "ids": [210]} in item["item_attributes"]
+
+
 def test_edit_item_rejects_unknown_fields(client: Vinted, fake: FakeTransport) -> None:
     fake.routes[("GET", "/api/v2/item_upload/items/1")] = ok({"code": 0, "item": {"id": 1, "price": "2", "item_attributes": []}})
     with pytest.raises(ValueError):

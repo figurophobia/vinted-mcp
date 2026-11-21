@@ -806,6 +806,8 @@ class Vinted:
         changes = dict(changes)
         attrs = {a["code"]: a.get("ids") or [] for a in cur.get("item_attributes") or [] if a.get("code")}
         attrs.update(changes.pop("attributes", None) or {})
+        if changes.get("size_id") is not None:  # a new size_id replaces the stored size attribute
+            attrs["size"] = [int(changes["size_id"])]
         condition = changes.pop("condition", None) or (attrs.pop("condition", [None]) or [None])[0] or cur.get("status_id")
         attrs.pop("condition", None)
         price = changes.pop("price", None)
