@@ -45,6 +45,10 @@ _LAST_START = 0.0
 class ApiError(Exception):
     """Any failure the caller can report to the user."""
 
+    def __init__(self, message: str, *, status: Optional[int] = None) -> None:
+        super().__init__(message)
+        self.status = status
+
 
 class TransportError(ApiError):
     """Network level failure. ``outcome`` is ``"not_sent"`` or ``"unknown"``."""
@@ -105,7 +109,7 @@ class Response:
 
     def raise_for_error(self) -> "Response":
         if not self.ok:
-            raise ApiError(self.error_reason)
+            raise ApiError(self.error_reason, status=self.status)
         return self
 
 

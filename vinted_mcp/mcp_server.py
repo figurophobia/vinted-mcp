@@ -16,9 +16,11 @@ import os
 import threading
 from typing import Any, Literal, Optional
 
+from mcp.server.mcpserver.exceptions import ToolError
+
 from . import config as _cfg
 from .client import Vinted
-from .http import Response
+from .http import ApiError, Response
 from .ids import item_id as _iid
 from .session import build_client, session_info
 
@@ -68,8 +70,8 @@ def _require_session() -> None:
 # --- read tools ------------------------------------------------------------
 
 def session_status() -> dict:
-    """Local session state (domain, token expiry) and whether writes are enabled. Never returns cookies."""
-    info = session_info(_session_path) if not os.environ.get("VINTED_COOKIES") else {"logged_in": True, "source": "env"}
+    """Local session state (domain, identity, token expiry) and whether writes are enabled. Never returns cookies."""
+    info = session_info(_session_path)
     info["writes_enabled"] = _allow_writes
     return info
 
@@ -102,11 +104,16 @@ def search(
 ) -> list:
     """Search listings. catalog_ids from list_categories; brand/size/color ids and other attribute codes from search_filters. Compact results; use get_item for details. include_shipping adds the "Envío desde" price (first 40 results)."""
     with _lock:
-        items = _c().search_items(
-            text, pages=max(1, min(pages, 5)), per_page=max(1, min(per_page, 96)),
-            catalog_ids=catalog_ids, brand_ids=brand_ids, conditions=conditions, size_ids=size_ids,
-            color_ids=color_ids, attributes=attributes, price_from=price_from, price_to=price_to, order=order,
-        )
+        try:
+            items = _c().search_items(
+                text, pages=max(1, min(pages, 5)), per_page=max(1, min(per_page, 96)),
+                catalog_ids=catalog_ids, brand_ids=brand_ids, conditions=conditions, size_ids=size_ids,
+                color_ids=color_ids, attributes=attributes, price_from=price_from, price_to=price_to, order=order,
+            )
+        except ApiError as exc:
+            if exc.status == 403:
+                raise ToolError("Vinted returned HTTP 403: Access denied. Don't retry through the MCP.") from None
+            raise
         out = [i.to_dict() for i in items]
         if include_shipping:  # one extra request per result
             from .client import shipping_summary
