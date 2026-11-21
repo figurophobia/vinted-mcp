@@ -11,7 +11,8 @@ Authentication is the browser session: the ``access_token_web`` /
 ``refresh_token_web`` cookies (plus the anti-bot cookies). A ``401`` refreshes
 the access token through ``/web/api/auth/refresh`` and replays the request.
 
-Checkout / payment is deliberately not implemented.
+Checkout lives in :mod:`vinted_mcp.checkout`: a prepared quote plus a one-time
+confirmation code, then a single payment with a saved card.
 """
 
 from __future__ import annotations
@@ -45,6 +46,8 @@ class Vinted:
         self.web = _cfg.web_base(self.domain)
         self.core = _cfg.core_base(self.domain)
         self.edge = _cfg.edge_base(self.domain)
+        #: Currency of this country site, used for offers, limits and price filters.
+        self.currency = _cfg.currency(self.domain)
         self.http = transport or Transport(
             cookies,
             domain=self.domain,
@@ -143,7 +146,7 @@ class Vinted:
         attributes: Optional[dict[str, Iterable[int]]] = None,
         price_from: Optional[float] = None,
         price_to: Optional[float] = None,
-        currency: str = "EUR",
+        currency: Optional[str] = None,
         order: str = "relevance",
         page: int = 1,
         per_page: int = 24,
@@ -163,7 +166,7 @@ class Vinted:
             "order": order,
             "price_from": price_from,
             "price_to": price_to,
-            "currency": currency if (price_from is not None or price_to is not None) else None,
+            "currency": (currency or self.currency) if (price_from is not None or price_to is not None) else None,
         }
         attrs: dict[str, Any] = dict(attributes or {})
         if catalog_ids:
@@ -468,7 +471,7 @@ class Vinted:
         return out
 
     def offer_to_liker(self, ref: str | int, user: str | int, price: Optional[float] = None,
-                       text: Optional[str] = None, currency: str = "EUR") -> Response:
+                       text: Optional[str] = None, currency: Optional[str] = None) -> Response:
         """Seller: message someone interested in your item and optionally propose a price.
 
         Opens (or reuses) the conversation about ``ref`` with ``user``, sends
@@ -575,9 +578,10 @@ class Vinted:
         return self.get("core", f"/transactions/{int(transaction_id)}")
 
     def offer_constraints(self, ref: str | int, price: float, seller_id: Optional[int] = None,
-                      currency: str = "EUR") -> Response:
-        """Offer suggestions/limits for an item at a given listed price."""
+                      currency: Optional[str] = None) -> Response:
+        """Offer suggestions/limits for an item at a given listed price (in the member currency)."""
         self._require_login()
+        currency = currency or self.currency
         iid = _item_id(ref)
         if seller_id is None:
             seller_id = self.item(iid).get("seller_id")
@@ -587,10 +591,15 @@ class Vinted:
             "seller_id": int(seller_id) if seller_id else None,
         })
 
-    def send_offer(self, ref: str | int, price: float, currency: str = "EUR",
+    def send_offer(self, ref: str | int, price: float, currency: Optional[str] = None,
                    transaction_id: Optional[int] = None) -> Response:
-        """Buyer: send a price offer on an item. Does not buy or pay."""
+        """Buyer: send a price offer on an item. Does not buy or pay.
+
+        ``price`` is in the member currency of this site (``self.currency``),
+        e.g. HUF on vinted.hu even for a listing priced in RON.
+        """
         self._require_login()
+        currency = currency or self.currency
         if transaction_id is None:
             conv = self.start_conversation(ref)
             if not conv.ok:
@@ -610,9 +619,10 @@ class Vinted:
         action = "accept" if accept else "reject"
         return self.send("PUT", "core", f"/transactions/{int(transaction_id)}/offer_requests/{int(offer_request_id)}/{action}")
 
-    def seller_offer(self, transaction_id: int, price: float, currency: str = "EUR") -> Response:
+    def seller_offer(self, transaction_id: int, price: float, currency: Optional[str] = None) -> Response:
         """Seller: propose a price to the buyer of a conversation (counter-offer)."""
         self._require_login()
+        currency = currency or self.currency
         return self.send("POST", "core", f"/transactions/{int(transaction_id)}/offers",
                          {"offer": {"price": _amount(price), "currency": currency}})
 
@@ -639,10 +649,11 @@ class Vinted:
         return self.send("PUT", "edge", f"/search-bar/v2/users/{self.my_id()}/previous_searches/{int(search_id)}/{verb}")
 
     def create_search(self, text: str, *, catalog_id: Optional[int] = None, price_from: Optional[float] = None,
-                      price_to: Optional[float] = None, currency: str = "EUR",
+                      price_to: Optional[float] = None, currency: Optional[str] = None,
                       filters: Optional[dict[str, Iterable[int]]] = None) -> Response:
         """Record a search in the account history (what the web does when you search)."""
         self._require_login()
+        currency = currency or self.currency
         body: dict[str, Any] = {"search_text": text}
         if catalog_id is not None:
             body["catalog_id"] = int(catalog_id)
@@ -693,7 +704,7 @@ class Vinted:
         package_size_id: Optional[int] = None,
         attributes: Optional[dict[str, list[int]]] = None,
         isbn: Optional[str] = None,
-        currency: str = "EUR",
+        currency: Optional[str] = None,
         item_id: Optional[int] = None,
         measurement_width: Optional[float | str] = None,
         measurement_length: Optional[float | str] = None,
@@ -706,7 +717,7 @@ class Vinted:
         item_attributes.append({"code": "condition", "ids": [condition_id(condition)]})
         item: dict[str, Any] = {
             "id": item_id,
-            "currency": currency,
+            "currency": currency or self.currency,
             "temp_uuid": temp_uuid,
             "title": title,
             "description": description,
@@ -837,7 +848,7 @@ class Vinted:
             package_size_id=changes.pop("package_size_id", cur.get("package_size_id")),
             attributes=attrs,
             isbn=changes.pop("isbn", cur.get("isbn")),
-            currency=cur.get("currency") or "EUR",
+            currency=cur.get("currency") or self.currency,
             item_id=iid,
             measurement_width=changes.pop("measurement_width", cur.get("measurement_width")),
             measurement_length=changes.pop("measurement_length", cur.get("measurement_length")),

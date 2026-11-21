@@ -209,6 +209,19 @@ def cmd_message(args: argparse.Namespace) -> None:
         raise SystemExit("error: pass --conversation <id> or --item <id>")
 
 
+def cmd_checkout(args: argparse.Namespace) -> None:
+    from .. import checkout
+
+    if args.checkout_cmd == "status":
+        _out(args, checkout.status(args.purchase))
+        return
+    v = _client(args)
+    if args.checkout_cmd == "prepare":
+        _out(args, checkout.prepare(v, args.item, shipping=args.shipping))
+    elif args.checkout_cmd == "pay":
+        _out(args, checkout.pay(v, args.purchase, args.code, args.total))
+
+
 def cmd_offer(args: argparse.Namespace) -> None:
     v = _client(args)
     if args.offer_cmd == "send":
@@ -391,7 +404,7 @@ def cmd_relist(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="vinted", description="Vinted from the terminal (no checkout).")
+    ap = argparse.ArgumentParser(prog="vinted", description="Vinted from the terminal.")
     ap.add_argument("--session", help="session JSON file (default ~/.config/vinted-mcp/session.json)")
     ap.add_argument("--pretty", action="store_true", help="indent JSON output")
     ap.add_argument("--version", action="version", version=f"%(prog)s {_cfg.VERSION}")
@@ -500,6 +513,18 @@ def build_parser() -> argparse.ArgumentParser:
     o = osub.add_parser("counter")
     o.add_argument("transaction", type=int)
     o.add_argument("--price", type=float, required=True)
+
+    p = add("checkout", cmd_checkout, "buy: prepare (quote + code, no payment) | pay (once, saved card) | status")
+    csub = p.add_subparsers(dest="checkout_cmd", required=True)
+    c = csub.add_parser("prepare", help="build the checkout and print the quote and a one-time code; does not pay")
+    c.add_argument("item")
+    c.add_argument("--shipping", choices=("auto", "home", "pickup"), default="auto")
+    c = csub.add_parser("pay", help="start the payment once; needs the code and the exact total from prepare")
+    c.add_argument("purchase")
+    c.add_argument("--code", required=True)
+    c.add_argument("--total", required=True, help="the total you confirmed, e.g. 10850")
+    c = csub.add_parser("status", help="locally recorded checkouts")
+    c.add_argument("purchase", nargs="?")
 
     p = add("likers", cmd_likers, "who favourited your listings; with --user/--offer/--text, contact one")
     p.add_argument("--item")

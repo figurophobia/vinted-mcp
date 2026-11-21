@@ -130,7 +130,9 @@ Message `data.entity_type`: `message`, `offer_request_message` (buyer offer: `of
 | ✅ | `PUT /transactions/{tid}/offer_requests/{oid}/accept|reject` | seller answers (status 20 accepted / 30 rejected) |
 | ✅ | `POST /transactions/{tid}/offers {offer:{price, currency}}` | seller offer / counter |
 | ✅ | `PUT /transactions/{tid}/reservation {reserved}`, `DELETE /items/{id}/reservation` | reserve for that buyer (5 days) / unreserve |
-| ⛔ | `POST /purchases/checkout/build`, `PUT /purchases/{id}/checkout` | checkout — deliberately not implemented |
+| ✅ | `POST /purchases/checkout/build {purchase_items:[{id:<transaction>, type:"transaction"}]}` | checkout: purchase id, components, checksum (`vinted_mcp/checkout.py`) |
+| ✅ | `PUT /purchases/{id}/checkout {components:{shipping_pickup_options:{pickup_type:1|2}, shipping_pickup_details:{rate_uuid, point_code, point_uuid}, payment_method:{card_id, payment_method}, …}}` | quote: `pay_button_v2.total.price`, `order_summary_v2`, fresh `checksum` |
+| ✅ | `POST /purchases/{id}/checkout/payment {checksum, payment_options:{browser_info}}` | payment, sent once: `payment.status` success/pending/failure or `action.type` (3-D Secure) |
 
 ## Listings (core unless noted)
 
